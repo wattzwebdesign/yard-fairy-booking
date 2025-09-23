@@ -1,0 +1,197 @@
+.yfb-calendar-wrapper {
+    max-width: 800px;
+    margin: 20px auto;
+    padding: 20px;
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 8px;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.yfb-calendar-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+    padding: 10px 0;
+}
+
+.yfb-cal-month-year {
+    font-size: 1.5em;
+    font-weight: 600;
+    color: #333;
+}
+
+.yfb-cal-prev,
+.yfb-cal-next {
+    background: #0073aa;
+    color: #fff;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 1.2em;
+    transition: background 0.3s ease;
+}
+
+.yfb-cal-prev:hover,
+.yfb-cal-next:hover {
+    background: #005177;
+}
+
+.yfb-calendar-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 5px;
+}
+
+.yfb-cal-day-header {
+    text-align: center;
+    font-weight: 600;
+    padding: 10px;
+    background: #f5f5f5;
+    border-radius: 4px;
+    color: #555;
+}
+
+.yfb-cal-days {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 5px;
+}
+
+.yfb-cal-day {
+    aspect-ratio: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+}
+
+.yfb-cal-day-empty {
+    border: none;
+    cursor: default;
+}
+
+.yfb-cal-day.yfb-cal-available {
+    background: #f0f8ff;
+    border-color: #0073aa;
+}
+
+.yfb-cal-day.yfb-cal-available:hover {
+    background: #e3f2fd;
+    transform: scale(1.05);
+}
+
+.yfb-cal-day.yfb-cal-disabled {
+    background: #f9f9f9;
+    color: #ccc;
+    cursor: not-allowed;
+}
+
+.yfb-cal-day.yfb-cal-today {
+    border: 2px solid #ff9800;
+    font-weight: 700;
+}
+
+.yfb-cal-day.yfb-cal-selected {
+    background: #0073aa;
+    color: #fff;
+    border-color: #0073aa;
+}
+
+.yfb-time-slots-container {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 2px solid #e0e0e0;
+}
+
+.yfb-time-slots-container h4 {
+    margin-bottom: 15px;
+    color: #333;
+}
+
+.yfb-time-slots-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+    gap: 10px;
+}
+
+.yfb-time-slot {
+    padding: 12px;
+    background: #f0f8ff;
+    border: 1px solid #0073aa;
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-weight: 500;
+    text-align: center;
+}
+
+.yfb-time-slot:hover {
+    background: #0073aa;
+    color: #fff;
+}
+
+.yfb-time-slot.yfb-time-slot-selected {
+    background: #0073aa;
+    color: #fff;
+}
+
+.yfb-time-slot.yfb-time-slot-disabled {
+    background: #f5f5f5;
+    color: #999;
+    border-color: #ddd;
+    cursor: not-allowed;
+}
+
+.yfb-selected-booking {
+    margin-top: 20px;
+    padding: 15px;
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 4px;
+    color: #155724;
+}
+
+.yfb-selected-booking p {
+    margin: 0;
+}
+
+.yfb-selected-datetime {
+    font-weight: 600;
+}
+
+#yfb-booking-calendar-container {
+    margin: 30px 0;
+}
+
+#yfb-booking-calendar-container h3 {
+    margin-bottom: 20px;
+    color: #333;
+}
+
+@media (max-width: 768px) {
+    .yfb-calendar-wrapper {
+        padding: 15px;
+    }
+
+    .yfb-cal-month-year {
+        font-size: 1.2em;
+    }
+
+    .yfb-time-slots-grid {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        gap: 8px;
+    }
+
+    .yfb-time-slot {
+        padding: 10px;
+        font-size: 0.9em;
+    }
+}

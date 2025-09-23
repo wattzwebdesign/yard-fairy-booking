@@ -1,0 +1,77 @@
+.show_if_yfb_bookable {
+    display: none;
+}
+
+.yfb-availability-day {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.yfb-availability-day label {
+    min-width: 100px;
+}
+
+.yfb-availability-day input[type="time"] {
+    padding: 6px;
+}
+
+.yfb-status {
+    display: inline-block;
+    padding: 5px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.yfb-status-pending {
+    background: #fff3cd;
+    color: #856404;
+}
+
+.yfb-status-confirmed {
+    background: #d4edda;
+    color: #155724;
+}
+
+.yfb-status-cancelled {
+    background: #f8d7da;
+    color: #721c24;
+}
+
+.yfb-status-completed {
+    background: #d1ecf1;
+    color: #0c5460;
+}
+
+.yfb-gcal-sync-status {
+    padding: 15px;
+}
+
+.yfb-gcal-sync-status p {
+    margin: 5px 0;
+}
+
+.yfb-synced {
+    color: #155724;
+    font-weight: 600;
+}
+
+.yfb-not-synced {
+    color: #721c24;
+    font-weight: 600;
+}
+
+.yfb-sync-gcal,
+.yfb-resync-gcal {
+    margin-top: 10px;
+}
+
+#yfb_booking_details .form-table th {
+    width: 200px;
+}
+
+#yfb_booking_details .form-table td {
+    padding: 15px 10px;
+}
