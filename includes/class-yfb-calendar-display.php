@@ -66,6 +66,9 @@ class YFB_Calendar_Display {
         foreach ($days as $day) {
             if ($use_custom === 'yes') {
                 $enabled = get_post_meta($product_id, '_yfb_day_' . $day . '_enabled', true);
+                if (empty($enabled)) {
+                    $enabled = 'yes';
+                }
             } else {
                 $enabled = get_option('yfb_default_day_' . $day . '_enabled', 'yes');
             }
@@ -124,6 +127,9 @@ class YFB_Calendar_Display {
         
         if ($use_custom === 'yes') {
             $enabled = get_post_meta($product_id, '_yfb_day_' . $day_name . '_enabled', true);
+            if (empty($enabled)) {
+                $enabled = 'yes';
+            }
             $start_time = get_post_meta($product_id, '_yfb_day_' . $day_name . '_start', true) ?: '09:00';
             $end_time = get_post_meta($product_id, '_yfb_day_' . $day_name . '_end', true) ?: '17:00';
         } else {

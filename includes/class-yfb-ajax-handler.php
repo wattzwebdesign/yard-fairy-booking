@@ -53,30 +53,35 @@ class YFB_Ajax_Handler {
         $days_in_month = cal_days_in_month(CAL_GREGORIAN, $month, $year);
         $availability = array();
 
-        $min_block = get_post_meta($product_id, '_yfb_min_block_bookable', true) ?: 3;
-        $min_block_unit = get_post_meta($product_id, '_yfb_min_block_bookable_unit', true) ?: 'day';
-        $max_block = get_post_meta($product_id, '_yfb_max_block_bookable', true) ?: 3;
-        $max_block_unit = get_post_meta($product_id, '_yfb_max_block_bookable_unit', true) ?: 'month';
+        $min_block = get_post_meta($product_id, '_yfb_min_block_bookable', true);
+        $min_block_unit = get_post_meta($product_id, '_yfb_min_block_bookable_unit', true);
+        $max_block = get_post_meta($product_id, '_yfb_max_block_bookable', true);
+        $max_block_unit = get_post_meta($product_id, '_yfb_max_block_bookable_unit', true);
 
         $min_date = new DateTime('now', wp_timezone());
-        if ($min_block_unit === 'month') {
-            $min_date->add(new DateInterval('P' . $min_block . 'M'));
-        } else {
-            $min_date->add(new DateInterval('P' . $min_block . 'D'));
+        if ($min_block && $min_block > 0) {
+            if ($min_block_unit === 'month') {
+                $min_date->add(new DateInterval('P' . $min_block . 'M'));
+            } else {
+                $min_date->add(new DateInterval('P' . $min_block . 'D'));
+            }
         }
 
-        $max_date = new DateTime('now', wp_timezone());
-        if ($max_block_unit === 'month') {
-            $max_date->add(new DateInterval('P' . $max_block . 'M'));
-        } else {
-            $max_date->add(new DateInterval('P' . $max_block . 'D'));
+        $max_date = null;
+        if ($max_block && $max_block > 0) {
+            $max_date = new DateTime('now', wp_timezone());
+            if ($max_block_unit === 'month') {
+                $max_date->add(new DateInterval('P' . $max_block . 'M'));
+            } else {
+                $max_date->add(new DateInterval('P' . $max_block . 'D'));
+            }
         }
 
         for ($day = 1; $day <= $days_in_month; $day++) {
             $date = sprintf('%04d-%02d-%02d', $year, $month, $day);
             $check_date = new DateTime($date, wp_timezone());
 
-            if ($check_date < $min_date || $check_date > $max_date) {
+            if ($check_date < $min_date || ($max_date && $check_date > $max_date)) {
                 $availability[$day] = false;
                 continue;
             }
@@ -86,6 +91,9 @@ class YFB_Ajax_Handler {
             
             if ($use_custom === 'yes') {
                 $enabled = get_post_meta($product_id, '_yfb_day_' . $day_name . '_enabled', true);
+                if (empty($enabled)) {
+                    $enabled = 'yes';
+                }
             } else {
                 $enabled = get_option('yfb_default_day_' . $day_name . '_enabled', 'yes');
             }

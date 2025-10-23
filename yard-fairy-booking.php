@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: Yard Fairy Booking
+ * Plugin Name: Yard Fairies Booking
  * Plugin URI: https://codewattz.com
  * Description: WooCommerce booking plugin with Google Calendar integration and front-end calendar display
- * Version: 1.0.0
+ * Version: 1.0.1
  * Author: Code Wattz
  * Author URI: https://codewattz.com
  * Text Domain: yard-fairy-booking
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('YFB_VERSION', '1.0.0');
+define('YFB_VERSION', '1.0.1');
 define('YFB_PLUGIN_FILE', __FILE__);
 define('YFB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('YFB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -94,7 +94,7 @@ if (!class_exists('Yard_Fairy_Booking')) {
         }
 
         public function woocommerce_missing_notice() {
-            echo '<div class="error"><p><strong>Yard Fairy Booking</strong> requires WooCommerce to be installed and active.</p></div>';
+            echo '<div class="error"><p><strong>Yard Fairies Booking</strong> requires WooCommerce to be installed and active.</p></div>';
         }
     }
 }

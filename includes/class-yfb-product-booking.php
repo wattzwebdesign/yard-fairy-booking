@@ -63,9 +63,10 @@ class YFB_Product_Booking {
         echo '<input type="number" name="_yfb_duration" id="_yfb_duration" value="' . esc_attr($duration) . '" placeholder="1" min="1" step="1" style="width: 60px; margin-right: 5px;">';
         
         $duration_unit = $product_id ? get_post_meta($product_id, '_yfb_duration_unit', true) : 'day';
+        if (empty($duration_unit)) $duration_unit = 'day';
         echo '<select name="_yfb_duration_unit" id="_yfb_duration_unit" class="short" style="width: auto;">';
-        echo '<option value="month" ' . selected($duration_unit, 'month', false) . '>' . __('Month(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="day" ' . selected($duration_unit, 'day', false) . '>' . __('Day(s)', 'yard-fairy-booking') . '</option>';
+        echo '<option value="month" ' . selected($duration_unit, 'month', false) . '>' . __('Month(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="hour" ' . selected($duration_unit, 'hour', false) . '>' . __('Hour(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="minute" ' . selected($duration_unit, 'minute', false) . '>' . __('Minute(s)', 'yard-fairy-booking') . '</option>';
         echo '</select>';
@@ -102,7 +103,7 @@ class YFB_Product_Booking {
         woocommerce_wp_text_input(array(
             'id' => '_yfb_max_bookings_per_block',
             'label' => __('Max Bookings Per Block', 'yard-fairy-booking'),
-            'placeholder' => '1',
+            'placeholder' => '2',
             'desc_tip' => true,
             'description' => __('Maximum number of bookings allowed per time slot', 'yard-fairy-booking'),
             'type' => 'number',
@@ -110,6 +111,7 @@ class YFB_Product_Booking {
                 'step' => '1',
                 'min' => '1',
             ),
+            'value' => $product_id ? get_post_meta($product_id, '_yfb_max_bookings_per_block', true) : '2',
         ));
 
         echo '<p class="form-field">';
@@ -133,10 +135,10 @@ class YFB_Product_Booking {
         echo '<label>' . __('Maximum Block Bookable', 'yard-fairy-booking') . '</label>';
         echo '<span class="wrap">';
         
-        $max_block = $product_id ? get_post_meta($product_id, '_yfb_max_block_bookable', true) : '3';
+        $max_block = $product_id ? get_post_meta($product_id, '_yfb_max_block_bookable', true) : '180';
         echo '<input type="number" name="_yfb_max_block_bookable" id="_yfb_max_block_bookable" value="' . esc_attr($max_block) . '" placeholder="3" min="1" step="1" style="width: 60px; margin-right: 5px;">';
         
-        $max_unit = $product_id ? get_post_meta($product_id, '_yfb_max_block_bookable_unit', true) : 'month';
+        $max_unit = $product_id ? get_post_meta($product_id, '_yfb_max_block_bookable_unit', true) : 'day';
         echo '<select name="_yfb_max_block_bookable_unit" id="_yfb_max_block_bookable_unit" class="short" style="width: auto; margin-right: 5px;">';
         echo '<option value="day" ' . selected($max_unit, 'day', false) . '>' . __('Day(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="month" ' . selected($max_unit, 'month', false) . '>' . __('Month(s)', 'yard-fairy-booking') . '</option>';
@@ -154,9 +156,10 @@ class YFB_Product_Booking {
         echo '<input type="number" name="_yfb_buffer_period" id="_yfb_buffer_period" value="' . esc_attr($buffer_period) . '" placeholder="1" min="0" step="1" style="width: 60px; margin-right: 5px;">';
         
         $buffer_unit = $product_id ? get_post_meta($product_id, '_yfb_buffer_unit', true) : 'day';
+        if (empty($buffer_unit)) $buffer_unit = 'day';
         echo '<select name="_yfb_buffer_unit" id="_yfb_buffer_unit" class="short" style="width: auto; margin-right: 5px;">';
-        echo '<option value="month" ' . selected($buffer_unit, 'month', false) . '>' . __('Month(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="day" ' . selected($buffer_unit, 'day', false) . '>' . __('Day(s)', 'yard-fairy-booking') . '</option>';
+        echo '<option value="month" ' . selected($buffer_unit, 'month', false) . '>' . __('Month(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="hour" ' . selected($buffer_unit, 'hour', false) . '>' . __('Hour(s)', 'yard-fairy-booking') . '</option>';
         echo '<option value="minute" ' . selected($buffer_unit, 'minute', false) . '>' . __('Minute(s)', 'yard-fairy-booking') . '</option>';
         echo '</select>';
@@ -169,34 +172,7 @@ class YFB_Product_Booking {
             'id' => '_yfb_adjacent_buffering',
             'label' => __('Adjacent Buffering?', 'yard-fairy-booking'),
             'description' => __('By default buffer period applies forward. Enable to apply adjacently (before and after).', 'yard-fairy-booking'),
-        ));
-
-        woocommerce_wp_select(array(
-            'id' => '_yfb_all_dates_are',
-            'label' => __('All Dates Are...', 'yard-fairy-booking'),
-            'options' => array(
-                'available' => __('Available by default', 'yard-fairy-booking'),
-                'non_available' => __('Not-available by default', 'yard-fairy-booking'),
-            ),
-            'desc_tip' => true,
-            'description' => __('This affects how you use the availability rules', 'yard-fairy-booking'),
-        ));
-
-        woocommerce_wp_select(array(
-            'id' => '_yfb_check_rules_against',
-            'label' => __('Check Rules Against...', 'yard-fairy-booking'),
-            'options' => array(
-                'all_blocks' => __('All blocks being booked', 'yard-fairy-booking'),
-                'start_block' => __('The start block only', 'yard-fairy-booking'),
-            ),
-            'desc_tip' => true,
-            'description' => __('How bookings are checked for availability', 'yard-fairy-booking'),
-        ));
-
-        woocommerce_wp_checkbox(array(
-            'id' => '_yfb_restrict_start_days',
-            'label' => __('Restrict Selectable Days?', 'yard-fairy-booking'),
-            'description' => __('Restrict the days of the week that are able to be selected on the calendar', 'yard-fairy-booking'),
+            'value' => $product_id ? get_post_meta($product_id, '_yfb_adjacent_buffering', true) : 'yes',
         ));
 
         echo '</div>';
@@ -250,8 +226,6 @@ class YFB_Product_Booking {
             '_yfb_max_block_bookable_unit',
             '_yfb_buffer_period',
             '_yfb_buffer_unit',
-            '_yfb_all_dates_are',
-            '_yfb_check_rules_against',
         );
 
         foreach ($fields as $field) {
@@ -266,7 +240,6 @@ class YFB_Product_Booking {
             '_yfb_requires_confirmation',
             '_yfb_can_be_cancelled',
             '_yfb_adjacent_buffering',
-            '_yfb_restrict_start_days',
         );
 
         foreach ($checkbox_fields as $field) {
@@ -445,7 +418,7 @@ class YFB_Product_Booking {
             $end_date->add(new DateInterval($buffer_interval));
         }
 
-        $max_bookings = get_post_meta($product_id, '_yfb_max_bookings_per_block', true) ?: 1;
+        $max_bookings = get_post_meta($product_id, '_yfb_max_bookings_per_block', true) ?: 2;
 
         $args = array(
             'post_type' => 'yfb_booking',
