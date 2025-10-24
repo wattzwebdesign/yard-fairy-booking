@@ -27,6 +27,7 @@ class YFB_Product_Booking {
         add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_booking_data_to_order_item'), 10, 4);
         add_action('woocommerce_order_status_processing', array($this, 'create_booking_from_order'));
         add_action('woocommerce_order_status_completed', array($this, 'create_booking_from_order'));
+        add_action('woocommerce_check_cart_items', array($this, 'validate_cart_delivery_distance'));
     }
 
     public function add_bookable_product_option($options) {
@@ -290,6 +291,18 @@ class YFB_Product_Booking {
             if (empty($_POST['yfb_delivery_address'])) {
                 wc_add_notice(__('Please enter a delivery address.', 'yard-fairy-booking'), 'error');
                 return false;
+            }
+
+            // Validate delivery distance doesn't exceed maximum
+            if (!empty($_POST['yfb_delivery_distance'])) {
+                $delivery_distance = floatval($_POST['yfb_delivery_distance']);
+                $max_mileage = floatval(get_option('yfb_max_delivery_mileage', 0));
+
+                if ($max_mileage > 0 && $delivery_distance >= $max_mileage) {
+                    $max_message = get_option('yfb_max_mileage_message', 'Sorry, we cannot deliver to your location. Please contact us for alternative arrangements.');
+                    wc_add_notice($max_message, 'error');
+                    return false;
+                }
             }
 
             foreach (WC()->cart->get_cart() as $cart_item) {
@@ -669,5 +682,40 @@ class YFB_Product_Booking {
         }
 
         return true;
+    }
+
+    /**
+     * Validate cart items don't exceed maximum delivery distance
+     * This runs before checkout and prevents order placement
+     */
+    public function validate_cart_delivery_distance() {
+        $max_mileage = floatval(get_option('yfb_max_delivery_mileage', 0));
+
+        // Only check if max mileage is set
+        if ($max_mileage <= 0) {
+            return;
+        }
+
+        foreach (WC()->cart->get_cart() as $cart_item) {
+            if (isset($cart_item['yfb_delivery_distance'])) {
+                $delivery_distance = floatval($cart_item['yfb_delivery_distance']);
+
+                if ($delivery_distance >= $max_mileage) {
+                    $max_message = get_option('yfb_max_mileage_message', 'Sorry, we cannot deliver to your location. Please contact us for alternative arrangements.');
+                    $product = wc_get_product($cart_item['product_id']);
+                    $product_name = $product ? $product->get_name() : __('Product', 'yard-fairy-booking');
+
+                    wc_add_notice(
+                        sprintf(
+                            __('%s: %s (Distance: %.2f miles)', 'yard-fairy-booking'),
+                            $product_name,
+                            $max_message,
+                            $delivery_distance
+                        ),
+                        'error'
+                    );
+                }
+            }
+        }
     }
 }

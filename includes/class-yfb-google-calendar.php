@@ -21,7 +21,10 @@ class YFB_Google_Calendar {
         add_action('wp_ajax_yfb_resync_to_gcal', array($this, 'ajax_resync_to_gcal'));
     }
 
-    public function get_client() {
+    /**
+     * Get a valid access token, refreshing if necessary
+     */
+    private function get_access_token() {
         $client_id = get_option('yfb_google_client_id');
         $client_secret = get_option('yfb_google_client_secret');
         $refresh_token = get_option('yfb_google_refresh_token');
@@ -30,34 +33,99 @@ class YFB_Google_Calendar {
             return false;
         }
 
-        $autoload_path = YFB_PLUGIN_DIR . 'vendor/autoload.php';
-        if (!file_exists($autoload_path)) {
+        $access_token_data = get_option('yfb_google_access_token');
+
+        // Check if token is expired
+        if ($access_token_data && isset($access_token_data['expires_at'])) {
+            if (time() < $access_token_data['expires_at']) {
+                return $access_token_data['access_token'];
+            }
+        }
+
+        // Refresh the access token
+        $response = wp_remote_post('https://oauth2.googleapis.com/token', array(
+            'body' => array(
+                'client_id' => $client_id,
+                'client_secret' => $client_secret,
+                'refresh_token' => $refresh_token,
+                'grant_type' => 'refresh_token',
+            ),
+        ));
+
+        if (is_wp_error($response)) {
+            error_log('YFB: Failed to refresh access token: ' . $response->get_error_message());
             return false;
         }
 
-        if (!class_exists('Google_Client')) {
-            require_once $autoload_path;
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (empty($data['access_token'])) {
+            error_log('YFB: No access token in refresh response: ' . $body);
+            return false;
         }
 
-        $client = new Google_Client();
-        $client->setClientId($client_id);
-        $client->setClientSecret($client_secret);
-        $client->setAccessType('offline');
-        $client->setScopes(array('https://www.googleapis.com/auth/calendar'));
+        // Save the new access token with expiration time
+        $token_data = array(
+            'access_token' => $data['access_token'],
+            'expires_at' => time() + (isset($data['expires_in']) ? $data['expires_in'] : 3600) - 300, // 5 min buffer
+        );
+        update_option('yfb_google_access_token', $token_data);
 
-        $client->setAccessToken(get_option('yfb_google_access_token'));
+        return $data['access_token'];
+    }
 
-        if ($client->isAccessTokenExpired()) {
-            $client->fetchAccessTokenWithRefreshToken($refresh_token);
-            update_option('yfb_google_access_token', $client->getAccessToken());
+    /**
+     * Make a request to the Google Calendar API
+     */
+    private function calendar_request($method, $endpoint, $body = null) {
+        $access_token = $this->get_access_token();
+        if (!$access_token) {
+            return new WP_Error('no_token', __('Could not get access token.', 'yard-fairy-booking'));
         }
 
-        return $client;
+        $args = array(
+            'method' => $method,
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $access_token,
+                'Content-Type' => 'application/json',
+            ),
+        );
+
+        if ($body !== null) {
+            $args['body'] = json_encode($body);
+        }
+
+        $response = wp_remote_request($endpoint, $args);
+
+        if (is_wp_error($response)) {
+            return $response;
+        }
+
+        $response_code = wp_remote_retrieve_response_code($response);
+        $response_body = wp_remote_retrieve_body($response);
+        $data = json_decode($response_body, true);
+
+        if ($response_code < 200 || $response_code >= 300) {
+            $error_message = isset($data['error']['message']) ? $data['error']['message'] : 'Unknown error';
+            return new WP_Error('api_error', $error_message, array('code' => $response_code, 'body' => $response_body));
+        }
+
+        return $data;
+    }
+
+    public function get_client() {
+        // This method is kept for backwards compatibility
+        // Returns true if credentials are configured, false otherwise
+        $client_id = get_option('yfb_google_client_id');
+        $client_secret = get_option('yfb_google_client_secret');
+        $refresh_token = get_option('yfb_google_refresh_token');
+
+        return !empty($client_id) && !empty($client_secret) && !empty($refresh_token);
     }
 
     public function sync_booking($booking_id) {
-        $client = $this->get_client();
-        if (!$client) {
+        if (!$this->get_client()) {
             return new WP_Error('no_client', __('Google Calendar is not configured.', 'yard-fairy-booking'));
         }
 
@@ -96,44 +164,55 @@ class YFB_Google_Calendar {
 
         $calendar_id = get_option('yfb_google_calendar_id', 'primary');
 
-        try {
-            $service = new Google_Service_Calendar($client);
+        $event_data = array(
+            'summary' => $event_title,
+            'description' => $event_description,
+            'start' => array(
+                'date' => $booking_date,
+            ),
+            'end' => array(
+                'date' => $end_date,
+            ),
+        );
 
-            $event = new Google_Service_Calendar_Event(array(
-                'summary' => $event_title,
-                'description' => $event_description,
-                'start' => array(
-                    'date' => $booking_date,
-                ),
-                'end' => array(
-                    'date' => $end_date,
-                ),
-            ));
+        $gcal_event_id = get_post_meta($booking_id, '_yfb_gcal_event_id', true);
 
-            $gcal_event_id = get_post_meta($booking_id, '_yfb_gcal_event_id', true);
-
-            if ($gcal_event_id) {
-                $updated_event = $service->events->update($calendar_id, $gcal_event_id, $event);
-                $event_id = $updated_event->getId();
-            } else {
-                $created_event = $service->events->insert($calendar_id, $event);
-                $event_id = $created_event->getId();
-            }
-
-            update_post_meta($booking_id, '_yfb_gcal_event_id', $event_id);
-            update_post_meta($booking_id, '_yfb_gcal_synced', true);
-            update_post_meta($booking_id, '_yfb_gcal_last_sync', current_time('mysql'));
-
-            return $event_id;
-
-        } catch (Exception $e) {
-            return new WP_Error('sync_failed', $e->getMessage());
+        if ($gcal_event_id) {
+            // Update existing event
+            $endpoint = sprintf(
+                'https://www.googleapis.com/calendar/v3/calendars/%s/events/%s',
+                urlencode($calendar_id),
+                urlencode($gcal_event_id)
+            );
+            $result = $this->calendar_request('PUT', $endpoint, $event_data);
+        } else {
+            // Create new event
+            $endpoint = sprintf(
+                'https://www.googleapis.com/calendar/v3/calendars/%s/events',
+                urlencode($calendar_id)
+            );
+            $result = $this->calendar_request('POST', $endpoint, $event_data);
         }
+
+        if (is_wp_error($result)) {
+            return $result;
+        }
+
+        if (empty($result['id'])) {
+            return new WP_Error('sync_failed', __('Failed to get event ID from Google Calendar.', 'yard-fairy-booking'));
+        }
+
+        $event_id = $result['id'];
+
+        update_post_meta($booking_id, '_yfb_gcal_event_id', $event_id);
+        update_post_meta($booking_id, '_yfb_gcal_synced', true);
+        update_post_meta($booking_id, '_yfb_gcal_last_sync', current_time('mysql'));
+
+        return $event_id;
     }
 
     public function delete_booking_from_calendar($booking_id) {
-        $client = $this->get_client();
-        if (!$client) {
+        if (!$this->get_client()) {
             return false;
         }
 
@@ -142,21 +221,25 @@ class YFB_Google_Calendar {
             return false;
         }
 
-        try {
-            $service = new Google_Service_Calendar($client);
-            $calendar_id = get_option('yfb_google_calendar_id', 'primary');
-            $service->events->delete($calendar_id, $gcal_event_id);
+        $calendar_id = get_option('yfb_google_calendar_id', 'primary');
+        $endpoint = sprintf(
+            'https://www.googleapis.com/calendar/v3/calendars/%s/events/%s',
+            urlencode($calendar_id),
+            urlencode($gcal_event_id)
+        );
 
-            delete_post_meta($booking_id, '_yfb_gcal_event_id');
-            delete_post_meta($booking_id, '_yfb_gcal_synced');
-            delete_post_meta($booking_id, '_yfb_gcal_last_sync');
+        $result = $this->calendar_request('DELETE', $endpoint);
 
-            return true;
-
-        } catch (Exception $e) {
-            error_log('YFB Google Calendar delete error: ' . $e->getMessage());
+        if (is_wp_error($result)) {
+            error_log('YFB Google Calendar delete error: ' . $result->get_error_message());
             return false;
         }
+
+        delete_post_meta($booking_id, '_yfb_gcal_event_id');
+        delete_post_meta($booking_id, '_yfb_gcal_synced');
+        delete_post_meta($booking_id, '_yfb_gcal_last_sync');
+
+        return true;
     }
 
     public function sync_booking_on_status_change($booking_id, $old_status, $new_status) {
@@ -196,30 +279,29 @@ class YFB_Google_Calendar {
     }
 
     public function get_bookings_from_calendar($start_date, $end_date) {
-        $client = $this->get_client();
-        if (!$client) {
+        if (!$this->get_client()) {
             return array();
         }
 
-        try {
-            $service = new Google_Service_Calendar($client);
-            $calendar_id = get_option('yfb_google_calendar_id', 'primary');
+        $calendar_id = get_option('yfb_google_calendar_id', 'primary');
 
-            $start = new DateTime($start_date, wp_timezone());
-            $end = new DateTime($end_date, wp_timezone());
+        $start = new DateTime($start_date, wp_timezone());
+        $end = new DateTime($end_date, wp_timezone());
 
-            $events = $service->events->listEvents($calendar_id, array(
-                'timeMin' => $start->format(DateTime::RFC3339),
-                'timeMax' => $end->format(DateTime::RFC3339),
-                'singleEvents' => true,
-                'orderBy' => 'startTime',
-            ));
+        $endpoint = sprintf(
+            'https://www.googleapis.com/calendar/v3/calendars/%s/events?timeMin=%s&timeMax=%s&singleEvents=true&orderBy=startTime',
+            urlencode($calendar_id),
+            urlencode($start->format(DateTime::RFC3339)),
+            urlencode($end->format(DateTime::RFC3339))
+        );
 
-            return $events->getItems();
+        $result = $this->calendar_request('GET', $endpoint);
 
-        } catch (Exception $e) {
-            error_log('YFB Google Calendar fetch error: ' . $e->getMessage());
+        if (is_wp_error($result)) {
+            error_log('YFB Google Calendar fetch error: ' . $result->get_error_message());
             return array();
         }
+
+        return isset($result['items']) ? $result['items'] : array();
     }
 }

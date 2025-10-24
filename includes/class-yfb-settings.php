@@ -427,16 +427,9 @@ class YFB_Settings {
             echo '</form>';
         } else {
             echo '<p class="yfb-auth-status disconnected">' . __('Not connected to Google Calendar', 'yard-fairy-booking') . '</p>';
-
-            if (!file_exists(YFB_PLUGIN_DIR . 'vendor/autoload.php')) {
-                echo '<div class="notice notice-warning inline"><p>';
-                echo __('Google Calendar integration requires the Google API client library. Run <code>composer install</code> in the plugin directory or upload the plugin with vendor folder included.', 'yard-fairy-booking');
-                echo '</p></div>';
-            } else {
-                $auth_url = $this->get_google_auth_url();
-                if ($auth_url) {
-                    echo '<a href="' . esc_url($auth_url) . '" class="button button-primary">' . __('Authorize with Google', 'yard-fairy-booking') . '</a>';
-                }
+            $auth_url = $this->get_google_auth_url();
+            if ($auth_url) {
+                echo '<a href="' . esc_url($auth_url) . '" class="button button-primary">' . __('Authorize with Google', 'yard-fairy-booking') . '</a>';
             }
         }
     }
@@ -449,24 +442,18 @@ class YFB_Settings {
             return false;
         }
 
-        $autoload_path = YFB_PLUGIN_DIR . 'vendor/autoload.php';
-        if (!file_exists($autoload_path)) {
-            return false;
-        }
+        $redirect_uri = admin_url('admin-ajax.php?action=yfb_google_oauth_callback');
 
-        if (!class_exists('Google_Client')) {
-            require_once $autoload_path;
-        }
+        $params = array(
+            'client_id' => $client_id,
+            'redirect_uri' => $redirect_uri,
+            'response_type' => 'code',
+            'scope' => 'https://www.googleapis.com/auth/calendar',
+            'access_type' => 'offline',
+            'prompt' => 'consent',
+        );
 
-        $client = new Google_Client();
-        $client->setClientId($client_id);
-        $client->setClientSecret($client_secret);
-        $client->setRedirectUri(admin_url('admin-ajax.php?action=yfb_google_oauth_callback'));
-        $client->setAccessType('offline');
-        $client->setPrompt('consent');
-        $client->setScopes(array('https://www.googleapis.com/auth/calendar'));
-
-        return $client->createAuthUrl();
+        return 'https://accounts.google.com/o/oauth2/v2/auth?' . http_build_query($params);
     }
 
     public function handle_oauth_callback() {
@@ -482,59 +469,61 @@ class YFB_Settings {
 
         $client_id = get_option('yfb_google_client_id');
         $client_secret = get_option('yfb_google_client_secret');
+        $redirect_uri = admin_url('admin-ajax.php?action=yfb_google_oauth_callback');
 
-        if (!class_exists('Google_Client')) {
-            require_once YFB_PLUGIN_DIR . 'vendor/autoload.php';
+        // Exchange authorization code for access token
+        $response = wp_remote_post('https://oauth2.googleapis.com/token', array(
+            'body' => array(
+                'code' => $code,
+                'client_id' => $client_id,
+                'client_secret' => $client_secret,
+                'redirect_uri' => $redirect_uri,
+                'grant_type' => 'authorization_code',
+            ),
+        ));
+
+        if (is_wp_error($response)) {
+            error_log('YFB OAuth Error: ' . $response->get_error_message());
+            wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=error'));
+            exit;
         }
 
-        $client = new Google_Client();
-        $client->setClientId($client_id);
-        $client->setClientSecret($client_secret);
-        $client->setRedirectUri(admin_url('admin-ajax.php?action=yfb_google_oauth_callback'));
-        $client->setAccessType('offline');
+        $body = wp_remote_retrieve_body($response);
+        $token = json_decode($body, true);
 
-        try {
-            $token = $client->fetchAccessTokenWithAuthCode($code);
+        if (isset($token['access_token'])) {
+            $token_data = array(
+                'access_token' => $token['access_token'],
+                'expires_at' => time() + (isset($token['expires_in']) ? $token['expires_in'] : 3600) - 300,
+            );
+            update_option('yfb_google_access_token', $token_data);
 
-            if (isset($token['access_token'])) {
-                update_option('yfb_google_access_token', $token);
-                
-                if (isset($token['refresh_token'])) {
-                    update_option('yfb_google_refresh_token', $token['refresh_token']);
+            if (isset($token['refresh_token'])) {
+                update_option('yfb_google_refresh_token', $token['refresh_token']);
+                wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=success'));
+                exit;
+            } else {
+                $existing_refresh = get_option('yfb_google_refresh_token');
+                if ($existing_refresh) {
                     wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=success'));
                     exit;
                 } else {
-                    $existing_refresh = get_option('yfb_google_refresh_token');
-                    if ($existing_refresh) {
-                        wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=success'));
-                        exit;
-                    } else {
-                        error_log('YFB OAuth: No refresh token received. User may need to revoke access first.');
-                        wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=no_refresh'));
-                        exit;
-                    }
+                    error_log('YFB OAuth: No refresh token received. User may need to revoke access first.');
+                    wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=no_refresh'));
+                    exit;
                 }
-            } else {
-                wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=error'));
-                exit;
             }
-        } catch (Exception $e) {
-            error_log('YFB OAuth Error: ' . $e->getMessage());
+        } else {
+            error_log('YFB OAuth Error: ' . $body);
             wp_redirect(admin_url('edit.php?post_type=yfb_booking&page=yfb-settings&auth=error'));
             exit;
         }
     }
 
     private function get_available_calendars() {
-        $autoload_path = YFB_PLUGIN_DIR . 'vendor/autoload.php';
-        if (!file_exists($autoload_path)) {
-            return array();
-        }
+        $gcal = YFB_Google_Calendar::instance();
 
-        if (!class_exists('Google_Client')) {
-            require_once $autoload_path;
-        }
-
+        // Use the same method from the calendar class to get access token
         $client_id = get_option('yfb_google_client_id');
         $client_secret = get_option('yfb_google_client_secret');
         $refresh_token = get_option('yfb_google_refresh_token');
@@ -543,34 +532,70 @@ class YFB_Settings {
             return array();
         }
 
-        try {
-            $client = new Google_Client();
-            $client->setClientId($client_id);
-            $client->setClientSecret($client_secret);
-            $client->setAccessType('offline');
-            $client->setAccessToken(get_option('yfb_google_access_token'));
+        // Get access token (will refresh if needed)
+        $access_token_data = get_option('yfb_google_access_token');
 
-            if ($client->isAccessTokenExpired()) {
-                $client->fetchAccessTokenWithRefreshToken($refresh_token);
-                update_option('yfb_google_access_token', $client->getAccessToken());
-            }
+        // Check if token is expired
+        if ($access_token_data && isset($access_token_data['expires_at'])) {
+            if (time() >= $access_token_data['expires_at']) {
+                // Refresh the token
+                $response = wp_remote_post('https://oauth2.googleapis.com/token', array(
+                    'body' => array(
+                        'client_id' => $client_id,
+                        'client_secret' => $client_secret,
+                        'refresh_token' => $refresh_token,
+                        'grant_type' => 'refresh_token',
+                    ),
+                ));
 
-            $service = new Google_Service_Calendar($client);
-            $calendar_list = $service->calendarList->listCalendarList();
-            
-            $calendars = array();
-            foreach ($calendar_list->getItems() as $calendar) {
-                $calendars[] = array(
-                    'id' => $calendar->getId(),
-                    'name' => $calendar->getSummary(),
+                if (is_wp_error($response)) {
+                    return array();
+                }
+
+                $body = wp_remote_retrieve_body($response);
+                $data = json_decode($body, true);
+
+                if (empty($data['access_token'])) {
+                    return array();
+                }
+
+                $access_token_data = array(
+                    'access_token' => $data['access_token'],
+                    'expires_at' => time() + (isset($data['expires_in']) ? $data['expires_in'] : 3600) - 300,
                 );
+                update_option('yfb_google_access_token', $access_token_data);
             }
-
-            return $calendars;
-
-        } catch (Exception $e) {
-            error_log('YFB Calendar List Error: ' . $e->getMessage());
+        } else {
             return array();
         }
+
+        // Fetch calendar list
+        $response = wp_remote_get('https://www.googleapis.com/calendar/v3/users/me/calendarList', array(
+            'headers' => array(
+                'Authorization' => 'Bearer ' . $access_token_data['access_token'],
+            ),
+        ));
+
+        if (is_wp_error($response)) {
+            error_log('YFB Calendar List Error: ' . $response->get_error_message());
+            return array();
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if (!isset($data['items'])) {
+            return array();
+        }
+
+        $calendars = array();
+        foreach ($data['items'] as $calendar) {
+            $calendars[] = array(
+                'id' => $calendar['id'],
+                'name' => $calendar['summary'],
+            );
+        }
+
+        return $calendars;
     }
 }

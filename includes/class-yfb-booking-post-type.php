@@ -84,6 +84,7 @@ class YFB_Booking_Post_Type {
 
         $product_id = get_post_meta($post->ID, '_yfb_product_id', true);
         $booking_date = get_post_meta($post->ID, '_yfb_booking_date', true);
+        $end_date = get_post_meta($post->ID, '_yfb_end_date', true);
         $start_time = get_post_meta($post->ID, '_yfb_start_time', true);
         $end_time = get_post_meta($post->ID, '_yfb_end_time', true);
         $customer_name = get_post_meta($post->ID, '_yfb_customer_name', true);
@@ -114,8 +115,18 @@ class YFB_Booking_Post_Type {
                 </td>
             </tr>
             <tr>
-                <th><label for="yfb_booking_date"><?php _e('Booking Date', 'yard-fairy-booking'); ?></label></th>
-                <td><input type="date" name="yfb_booking_date" id="yfb_booking_date" value="<?php echo esc_attr($booking_date); ?>" style="width: 100%;"></td>
+                <th><label for="yfb_booking_date"><?php _e('Start Date', 'yard-fairy-booking'); ?></label></th>
+                <td>
+                    <input type="date" name="yfb_booking_date" id="yfb_booking_date" value="<?php echo esc_attr($booking_date); ?>" style="width: 100%;">
+                    <p class="description"><?php _e('First day of the booking', 'yard-fairy-booking'); ?></p>
+                </td>
+            </tr>
+            <tr>
+                <th><label for="yfb_end_date"><?php _e('End Date', 'yard-fairy-booking'); ?></label></th>
+                <td>
+                    <input type="date" name="yfb_end_date" id="yfb_end_date" value="<?php echo esc_attr($end_date); ?>" style="width: 100%;">
+                    <p class="description"><?php _e('Last day of the booking (same as start date for single-day bookings)', 'yard-fairy-booking'); ?></p>
+                </td>
             </tr>
             <tr>
                 <th><label for="yfb_customer_name"><?php _e('Customer Name', 'yard-fairy-booking'); ?></label></th>
@@ -232,6 +243,7 @@ class YFB_Booking_Post_Type {
         $fields = array(
             'yfb_product_id',
             'yfb_booking_date',
+            'yfb_end_date',
             'yfb_customer_name',
             'yfb_customer_email',
             'yfb_customer_phone',
@@ -247,21 +259,24 @@ class YFB_Booking_Post_Type {
         if (isset($_POST['yfb_booking_date']) && isset($_POST['yfb_product_id'])) {
             $product_id = sanitize_text_field($_POST['yfb_product_id']);
             $booking_date = sanitize_text_field($_POST['yfb_booking_date']);
-            $product = wc_get_product($product_id);
-            
-            if ($product) {
-                $duration = get_post_meta($product_id, '_yfb_duration', true) ?: 1;
-                $end_datetime = new DateTime($booking_date, wp_timezone());
-                $end_datetime->add(new DateInterval('P' . $duration . 'D'));
-                update_post_meta($post_id, '_yfb_end_date', $end_datetime->format('Y-m-d'));
+            $end_date = isset($_POST['yfb_end_date']) ? sanitize_text_field($_POST['yfb_end_date']) : $booking_date;
 
+            // If end date is empty or before start date, set it to start date (single day booking)
+            if (empty($end_date) || $end_date < $booking_date) {
+                $end_date = $booking_date;
+                update_post_meta($post_id, '_yfb_end_date', $end_date);
+            }
+
+            $product = wc_get_product($product_id);
+
+            if ($product) {
                 $customer_name = isset($_POST['yfb_customer_name']) ? sanitize_text_field($_POST['yfb_customer_name']) : '';
                 $customer_email = isset($_POST['yfb_customer_email']) ? sanitize_text_field($_POST['yfb_customer_email']) : '';
                 $customer_phone = isset($_POST['yfb_customer_phone']) ? sanitize_text_field($_POST['yfb_customer_phone']) : '';
                 $order_id = get_post_meta($post_id, '_yfb_order_id', true);
 
                 $title_template = get_option('yfb_google_event_title', '{product_name} - {customer_name}');
-                
+
                 $replacements = array(
                     '{product_name}' => $product->get_name(),
                     '{customer_name}' => $customer_name,
@@ -272,7 +287,7 @@ class YFB_Booking_Post_Type {
                 );
 
                 $booking_title = str_replace(array_keys($replacements), array_values($replacements), $title_template);
-                
+
                 remove_action('save_post_yfb_booking', array($this, 'save_booking_meta'));
                 wp_update_post(array(
                     'ID' => $post_id,
@@ -327,8 +342,22 @@ class YFB_Booking_Post_Type {
 
             case 'booking_date':
                 $booking_date = get_post_meta($post_id, '_yfb_booking_date', true);
+                $end_date = get_post_meta($post_id, '_yfb_end_date', true);
+
                 if ($booking_date) {
-                    echo esc_html(date_i18n(get_option('date_format'), strtotime($booking_date)));
+                    $formatted_start = date_i18n(get_option('date_format'), strtotime($booking_date));
+
+                    if ($end_date && $end_date !== $booking_date) {
+                        $formatted_end = date_i18n(get_option('date_format'), strtotime($end_date));
+                        $start = new DateTime($booking_date);
+                        $end = new DateTime($end_date);
+                        $days = $start->diff($end)->days + 1;
+                        echo esc_html($formatted_start . ' - ' . $formatted_end);
+                        echo '<br><small>(' . $days . ' ' . _n('day', 'days', $days, 'yard-fairy-booking') . ')</small>';
+                    } else {
+                        echo esc_html($formatted_start);
+                        echo '<br><small>(1 ' . __('day', 'yard-fairy-booking') . ')</small>';
+                    }
                 }
                 break;
 

@@ -122,41 +122,69 @@ jQuery(document).ready(function($) {
 
         const clickedDate = $(this).data('date');
 
-        // First click - set start date
-        if (!startDate || (startDate && endDate)) {
+        // First click or clicking after a completed selection - start new selection
+        if (!startDate) {
             startDate = clickedDate;
-            endDate = null;
-            isSelectingRange = true;
+            endDate = clickedDate;
+            isSelectingRange = false;
             renderCalendar(currentDate);
 
             const dateParts = startDate.split('-');
             const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
             const formattedDate = dateObj.toLocaleDateString('default', {
-                weekday: 'long',
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
             });
 
-            $('.yfb-selected-datetime').text('Start: ' + formattedDate + ' (Select end date)');
+            $('.yfb-selected-datetime').html(
+                `<strong>${formattedDate}</strong> (1 day) <span style="font-size: 0.9em; color: #666;">- Click another date to extend range</span>`
+            );
             $('.yfb-selected-booking').show();
+
+            // Set hidden fields with date range
+            $('#yfb_booking_date').val(startDate);
+
+            // Add end date field if it doesn't exist
+            if ($('#yfb_booking_end_date').length === 0) {
+                $('.yfb-calendar-wrapper').append('<input type="hidden" name="yfb_booking_end_date" id="yfb_booking_end_date" value="">');
+            }
+            $('#yfb_booking_end_date').val(endDate);
+
+            $('.yfb-time-slots-container').hide();
             return;
         }
 
-        // Second click - set end date
-        if (startDate && !endDate) {
+        // Second click - modify the range
+        if (startDate && endDate) {
+            // If clicking the same date that's already selected as single day, reset selection
+            if (clickedDate === startDate && clickedDate === endDate) {
+                startDate = null;
+                endDate = null;
+                isSelectingRange = false;
+                renderCalendar(currentDate);
+                $('.yfb-selected-booking').hide();
+                $('#yfb_booking_date').val('');
+                $('#yfb_booking_end_date').val('');
+                return;
+            }
+
+            // Determine new start and end based on clicked date
             if (clickedDate < startDate) {
-                // Swap if end is before start
-                endDate = startDate;
+                // Clicked date becomes new start
                 startDate = clickedDate;
+            } else if (clickedDate > endDate) {
+                // Clicked date becomes new end
+                endDate = clickedDate;
             } else {
+                // Clicked date is between start and end, set as new single day range
+                startDate = clickedDate;
                 endDate = clickedDate;
             }
 
-            isSelectingRange = false;
             renderCalendar(currentDate);
 
-            // Calculate number of days and total price
+            // Calculate number of days
             const start = new Date(startDate);
             const end = new Date(endDate);
             const daysDiff = Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1;
@@ -172,18 +200,19 @@ jQuery(document).ready(function($) {
                 year: 'numeric'
             });
 
-            $('.yfb-selected-datetime').html(
-                `<strong>${startFormatted}</strong> to <strong>${endFormatted}</strong> (${daysDiff} day${daysDiff > 1 ? 's' : ''})`
-            );
+            if (daysDiff === 1) {
+                $('.yfb-selected-datetime').html(
+                    `<strong>${startFormatted}</strong> (1 day) <span style="font-size: 0.9em; color: #666;">- Click another date to extend range</span>`
+                );
+            } else {
+                $('.yfb-selected-datetime').html(
+                    `<strong>${startFormatted}</strong> to <strong>${endFormatted}</strong> (${daysDiff} days)`
+                );
+            }
             $('.yfb-selected-booking').show();
 
-            // Set hidden fields with date range
+            // Update hidden fields
             $('#yfb_booking_date').val(startDate);
-
-            // Add end date field if it doesn't exist
-            if ($('#yfb_booking_end_date').length === 0) {
-                $('.yfb-calendar-wrapper').append('<input type="hidden" name="yfb_booking_end_date" id="yfb_booking_end_date" value="">');
-            }
             $('#yfb_booking_end_date').val(endDate);
 
             $('.yfb-time-slots-container').hide();
