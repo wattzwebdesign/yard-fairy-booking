@@ -3,7 +3,7 @@
  * Plugin Name: Yard Fairies Booking
  * Plugin URI: https://codewattz.com
  * Description: WooCommerce booking plugin with Google Calendar integration and front-end calendar display
- * Version: 1.0.1
+ * Version: 1.0.2
  * Author: Code Wattz
  * Author URI: https://codewattz.com
  * Text Domain: yard-fairy-booking
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('YFB_VERSION', '1.0.1');
+define('YFB_VERSION', '1.0.2');
 define('YFB_PLUGIN_FILE', __FILE__);
 define('YFB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('YFB_PLUGIN_URL', plugin_dir_url(__FILE__));

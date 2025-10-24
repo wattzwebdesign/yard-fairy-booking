@@ -3,6 +3,13 @@ jQuery(document).ready(function($) {
     let currentDate = new Date();
     let selectedDate = null;
     let selectedTime = null;
+    let startDate = null;
+    let endDate = null;
+    let isSelectingRange = false;
+    let deliveryDistanceCalculated = false;
+    let deliveryDistance = 0;
+    let deliveryFeeAmount = 0;
+    let exceedsMaxMileage = false;
 
     function renderCalendar(date) {
         const year = date.getFullYear();
@@ -40,13 +47,19 @@ jQuery(document).ready(function($) {
                         const isAvailable = response.data.availability[day];
                         const isToday = new Date().toDateString() === new Date(year, month, day).toDateString();
                         const isSelected = selectedDate === dateStr;
-                        
+                        const isStartDate = startDate === dateStr;
+                        const isEndDate = endDate === dateStr;
+                        const isInRange = startDate && endDate && dateStr >= startDate && dateStr <= endDate;
+
                         let classes = 'yfb-cal-day';
                         if (isToday) classes += ' yfb-cal-today';
                         if (isAvailable) classes += ' yfb-cal-available';
                         if (isSelected) classes += ' yfb-cal-selected';
+                        if (isStartDate) classes += ' yfb-cal-range-start';
+                        if (isEndDate) classes += ' yfb-cal-range-end';
+                        if (isInRange) classes += ' yfb-cal-in-range';
                         if (!isAvailable) classes += ' yfb-cal-disabled';
-                        
+
                         html += `<div class="${classes}" data-date="${dateStr}">${day}</div>`;
                     }
                     
@@ -107,26 +120,74 @@ jQuery(document).ready(function($) {
             return;
         }
 
-        $('.yfb-cal-day').removeClass('yfb-cal-selected');
-        $(this).addClass('yfb-cal-selected');
-        
-        selectedDate = $(this).data('date');
-        
-        const dateParts = selectedDate.split('-');
-        const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
-        const formattedDate = dateObj.toLocaleDateString('default', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric' 
-        });
-        
-        $('.yfb-selected-datetime').text(formattedDate);
-        $('.yfb-selected-booking').show();
-        
-        $('input[name="yfb_booking_date"]').val(selectedDate);
-        
-        $('.yfb-time-slots-container').hide();
+        const clickedDate = $(this).data('date');
+
+        // First click - set start date
+        if (!startDate || (startDate && endDate)) {
+            startDate = clickedDate;
+            endDate = null;
+            isSelectingRange = true;
+            renderCalendar(currentDate);
+
+            const dateParts = startDate.split('-');
+            const dateObj = new Date(dateParts[0], dateParts[1] - 1, dateParts[2]);
+            const formattedDate = dateObj.toLocaleDateString('default', {
+                weekday: 'long',
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric'
+            });
+
+            $('.yfb-selected-datetime').text('Start: ' + formattedDate + ' (Select end date)');
+            $('.yfb-selected-booking').show();
+            return;
+        }
+
+        // Second click - set end date
+        if (startDate && !endDate) {
+            if (clickedDate < startDate) {
+                // Swap if end is before start
+                endDate = startDate;
+                startDate = clickedDate;
+            } else {
+                endDate = clickedDate;
+            }
+
+            isSelectingRange = false;
+            renderCalendar(currentDate);
+
+            // Calculate number of days and total price
+            const start = new Date(startDate);
+            const end = new Date(endDate);
+            const daysDiff = Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1;
+
+            const startFormatted = start.toLocaleDateString('default', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+            });
+            const endFormatted = end.toLocaleDateString('default', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+            });
+
+            $('.yfb-selected-datetime').html(
+                `<strong>${startFormatted}</strong> to <strong>${endFormatted}</strong> (${daysDiff} day${daysDiff > 1 ? 's' : ''})`
+            );
+            $('.yfb-selected-booking').show();
+
+            // Set hidden fields with date range
+            $('#yfb_booking_date').val(startDate);
+
+            // Add end date field if it doesn't exist
+            if ($('#yfb_booking_end_date').length === 0) {
+                $('.yfb-calendar-wrapper').append('<input type="hidden" name="yfb_booking_end_date" id="yfb_booking_end_date" value="">');
+            }
+            $('#yfb_booking_end_date').val(endDate);
+
+            $('.yfb-time-slots-container').hide();
+        }
     });
 
     $(document).on('click', '.yfb-time-slot:not(.yfb-time-slot-disabled)', function() {
@@ -167,14 +228,56 @@ jQuery(document).ready(function($) {
 
     $('form.cart').on('submit', function(e) {
         if ($('.yfb-calendar-wrapper').length > 0) {
-            const bookingDate = $('input[name="yfb_booking_date"]').val();
-            
+            const bookingDate = $('#yfb_booking_date').val();
+            const bookingEndDate = $('#yfb_booking_end_date').val();
+            const deliveryAddress = $('#yfb_delivery_address').val();
+            const deliveryDistance = $('#yfb_delivery_distance').val();
+            const deliveryFee = $('#yfb_delivery_fee').val();
+
             if (!bookingDate) {
                 return true;
             }
-            
+
+            // Validate delivery address
+            if (!deliveryAddress || deliveryAddress.trim() === '') {
+                e.preventDefault();
+                alert('Please enter a delivery address.');
+                $('#yfb_delivery_address').focus();
+                return false;
+            }
+
+            if (!deliveryDistanceCalculated) {
+                e.preventDefault();
+                alert('Please wait for delivery distance calculation to complete, or check that the address is valid.');
+                return false;
+            }
+
+            // Prevent submission if max mileage exceeded
+            if (exceedsMaxMileage) {
+                e.preventDefault();
+                alert('Cannot add to cart. The delivery address exceeds our maximum delivery distance.');
+                return false;
+            }
+
+            // Add all booking fields to form
             if ($(this).find('input[name="yfb_booking_date"]').length === 0) {
                 $(this).append('<input type="hidden" name="yfb_booking_date" value="' + bookingDate + '">');
+            }
+
+            if (bookingEndDate && $(this).find('input[name="yfb_booking_end_date"]').length === 0) {
+                $(this).append('<input type="hidden" name="yfb_booking_end_date" value="' + bookingEndDate + '">');
+            }
+
+            if ($(this).find('input[name="yfb_delivery_address"]').length === 0) {
+                $(this).append('<input type="hidden" name="yfb_delivery_address" value="' + deliveryAddress + '">');
+            }
+
+            if (deliveryDistance && $(this).find('input[name="yfb_delivery_distance"]').length === 0) {
+                $(this).append('<input type="hidden" name="yfb_delivery_distance" value="' + deliveryDistance + '">');
+            }
+
+            if (deliveryFee && $(this).find('input[name="yfb_delivery_fee"]').length === 0) {
+                $(this).append('<input type="hidden" name="yfb_delivery_fee" value="' + deliveryFee + '">');
             }
         }
     });
@@ -212,6 +315,94 @@ jQuery(document).ready(function($) {
         $('#yfb-booking-calendar').html(calendarHtml);
         renderCalendar(currentDate);
     }
+
+    // Delivery address distance calculation
+    let deliveryCalculationTimeout;
+    $(document).on('input', '#yfb_delivery_address', function() {
+        clearTimeout(deliveryCalculationTimeout);
+        deliveryDistanceCalculated = false;
+        $('.yfb-delivery-info').hide();
+    });
+
+    $(document).on('blur', '#yfb_delivery_address', function() {
+        const address = $(this).val().trim();
+
+        if (!address) {
+            return;
+        }
+
+        clearTimeout(deliveryCalculationTimeout);
+        deliveryCalculationTimeout = setTimeout(function() {
+            calculateDeliveryDistance(address);
+        }, 500);
+    });
+
+    function calculateDeliveryDistance(address) {
+        $('.yfb-delivery-info').html('<span class="dashicons dashicons-update dashicons-spin"></span> Calculating distance...').show();
+
+        $.ajax({
+            url: yfb_ajax.ajax_url,
+            type: 'POST',
+            data: {
+                action: 'yfb_calculate_delivery_distance',
+                nonce: yfb_ajax.nonce,
+                delivery_address: address
+            },
+            success: function(response) {
+                if (response.success) {
+                    deliveryDistanceCalculated = true;
+                    deliveryDistance = response.data.distance;
+                    deliveryFeeAmount = response.data.fee_amount;
+                    exceedsMaxMileage = response.data.exceeds_max || false;
+
+                    $('#yfb_delivery_distance').val(deliveryDistance);
+                    $('#yfb_delivery_fee').val(deliveryFeeAmount);
+
+                    // Handle max mileage exceeded
+                    if (exceedsMaxMileage) {
+                        $('.yfb-delivery-info')
+                            .html('<strong style="color: #d9534f;">' + response.data.message + '</strong>')
+                            .removeClass('yfb-delivery-fee-required yfb-delivery-no-fee')
+                            .addClass('yfb-delivery-max-exceeded')
+                            .show();
+
+                        // Hide entire add to cart section
+                        $('form.cart').hide();
+
+                        // Add error message after the calendar wrapper
+                        if ($('.yfb-max-mileage-notice').length === 0) {
+                            $('.yfb-calendar-wrapper').after(
+                                '<p class="yfb-max-mileage-notice" style="color: #d9534f; font-weight: bold; margin-top: 10px;">Cannot add to cart - delivery address exceeds maximum distance.</p>'
+                            );
+                        }
+                    } else {
+                        // Show add to cart form
+                        $('form.cart').show();
+
+                        // Remove error message
+                        $('.yfb-max-mileage-notice').remove();
+
+                        let infoClass = response.data.requires_fee ? 'yfb-delivery-fee-required' : 'yfb-delivery-no-fee';
+                        $('.yfb-delivery-info')
+                            .html(response.data.message)
+                            .removeClass('yfb-delivery-fee-required yfb-delivery-no-fee yfb-delivery-max-exceeded')
+                            .addClass(infoClass)
+                            .show();
+                    }
+                } else {
+                    $('.yfb-delivery-info')
+                        .html('<span style="color: red;">' + response.data.message + '</span>')
+                        .show();
+                }
+            },
+            error: function() {
+                $('.yfb-delivery-info')
+                    .html('<span style="color: red;">Error calculating distance. Please try again.</span>')
+                    .show();
+            }
+        });
+    }
+
 
     $(document).on('click', '.yfb-sync-gcal, .yfb-resync-gcal', function() {
         const $button = $(this);

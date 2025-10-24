@@ -115,8 +115,18 @@ class YFB_Calendar_Display {
             <div class="yfb-selected-booking" style="display: none;">
                 <p><strong><?php _e('Selected:', 'yard-fairy-booking'); ?></strong> <span class="yfb-selected-datetime"></span></p>
             </div>
+            <div class="yfb-delivery-address-wrapper" style="margin-top: 20px;">
+                <label for="yfb_delivery_address" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                    <?php _e('Delivery Address:', 'yard-fairy-booking'); ?> <span style="color: red;">*</span>
+                </label>
+                <input type="text" name="yfb_delivery_address" id="yfb_delivery_address" class="yfb-delivery-address-input" placeholder="<?php esc_attr_e('Enter full delivery address', 'yard-fairy-booking'); ?>" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px;" required>
+                <p class="yfb-delivery-info" style="margin-top: 8px; font-size: 0.9em; color: #666; display: none;"></p>
+            </div>
             <input type="hidden" name="yfb_booking_date" id="yfb_booking_date" value="">
+            <input type="hidden" name="yfb_booking_end_date" id="yfb_booking_end_date" value="">
             <input type="hidden" name="yfb_booking_time" id="yfb_booking_time" value="">
+            <input type="hidden" name="yfb_delivery_distance" id="yfb_delivery_distance" value="">
+            <input type="hidden" name="yfb_delivery_fee" id="yfb_delivery_fee" value="">
         </div>
         <?php
     }

@@ -18,9 +18,12 @@ class YFB_Ajax_Handler {
     public function __construct() {
         add_action('wp_ajax_yfb_get_available_slots', array($this, 'get_available_slots'));
         add_action('wp_ajax_nopriv_yfb_get_available_slots', array($this, 'get_available_slots'));
-        
+
         add_action('wp_ajax_yfb_get_month_availability', array($this, 'get_month_availability'));
         add_action('wp_ajax_nopriv_yfb_get_month_availability', array($this, 'get_month_availability'));
+
+        add_action('wp_ajax_yfb_calculate_delivery_distance', array($this, 'calculate_delivery_distance'));
+        add_action('wp_ajax_nopriv_yfb_calculate_delivery_distance', array($this, 'calculate_delivery_distance'));
     }
 
     public function get_available_slots() {
@@ -162,5 +165,87 @@ class YFB_Ajax_Handler {
         }
 
         wp_send_json_success(array('availability' => $availability));
+    }
+
+    public function calculate_delivery_distance() {
+        check_ajax_referer('yfb_ajax_nonce', 'nonce');
+
+        $delivery_address = isset($_POST['delivery_address']) ? sanitize_text_field($_POST['delivery_address']) : '';
+
+        if (empty($delivery_address)) {
+            wp_send_json_error(array('message' => __('Please enter a delivery address.', 'yard-fairy-booking')));
+        }
+
+        $home_base = get_option('yfb_home_base_address');
+        $api_key = get_option('yfb_google_maps_api_key');
+        $included_mileage = floatval(get_option('yfb_included_mileage', 10));
+        $delivery_fee = floatval(get_option('yfb_delivery_fee', 25));
+        $max_mileage = floatval(get_option('yfb_max_delivery_mileage', 100));
+        $max_mileage_message = get_option('yfb_max_mileage_message', 'Sorry, we cannot deliver to your location. Please contact us for alternative arrangements.');
+
+        if (empty($home_base)) {
+            wp_send_json_error(array('message' => __('Home base address not configured.', 'yard-fairy-booking')));
+        }
+
+        if (empty($api_key)) {
+            wp_send_json_error(array('message' => __('Google Maps API key not configured.', 'yard-fairy-booking')));
+        }
+
+        // Call Google Distance Matrix API
+        $url = add_query_arg(array(
+            'origins' => urlencode($home_base),
+            'destinations' => urlencode($delivery_address),
+            'units' => 'imperial',
+            'key' => $api_key
+        ), 'https://maps.googleapis.com/maps/api/distancematrix/json');
+
+        $response = wp_remote_get($url);
+
+        if (is_wp_error($response)) {
+            wp_send_json_error(array('message' => __('Failed to calculate distance. Please try again.', 'yard-fairy-booking')));
+        }
+
+        $body = wp_remote_retrieve_body($response);
+        $data = json_decode($body, true);
+
+        if ($data['status'] !== 'OK' || empty($data['rows'][0]['elements'][0]['distance'])) {
+            wp_send_json_error(array('message' => __('Could not calculate distance. Please check the address.', 'yard-fairy-booking')));
+        }
+
+        $distance_meters = $data['rows'][0]['elements'][0]['distance']['value'];
+        $distance_miles = $distance_meters * 0.000621371; // Convert meters to miles
+        $distance_miles = round($distance_miles, 2);
+
+        // Check if max mileage is exceeded
+        $exceeds_max = $max_mileage > 0 && $distance_miles >= $max_mileage;
+
+        if ($exceeds_max) {
+            wp_send_json_success(array(
+                'distance' => $distance_miles,
+                'included_mileage' => $included_mileage,
+                'max_mileage' => $max_mileage,
+                'exceeds_max' => true,
+                'requires_fee' => false,
+                'fee_amount' => 0,
+                'message' => sprintf(__('Distance: %.2f miles. %s', 'yard-fairy-booking'), $distance_miles, esc_html($max_mileage_message))
+            ));
+        }
+
+        $requires_fee = $distance_miles > $included_mileage;
+        $fee_amount = $requires_fee ? $delivery_fee : 0;
+
+        wp_send_json_success(array(
+            'distance' => $distance_miles,
+            'included_mileage' => $included_mileage,
+            'max_mileage' => $max_mileage,
+            'exceeds_max' => false,
+            'requires_fee' => $requires_fee,
+            'fee_amount' => $fee_amount,
+            'message' => sprintf(
+                __('Distance: %.2f miles. %s', 'yard-fairy-booking'),
+                $distance_miles,
+                $requires_fee ? sprintf(__('Delivery fee of %s will be applied.', 'yard-fairy-booking'), wc_price($fee_amount)) : __('Within included mileage - no delivery fee.', 'yard-fairy-booking')
+            )
+        ));
     }
 }

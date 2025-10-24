@@ -22,6 +22,8 @@ class YFB_Product_Booking {
         add_action('woocommerce_add_to_cart_validation', array($this, 'validate_booking_data'), 10, 3);
         add_filter('woocommerce_add_cart_item_data', array($this, 'add_booking_data_to_cart'), 10, 2);
         add_filter('woocommerce_get_item_data', array($this, 'display_booking_data_in_cart'), 10, 2);
+        add_action('woocommerce_before_calculate_totals', array($this, 'update_cart_item_prices'), 10, 1);
+        add_filter('woocommerce_get_cart_item_from_session', array($this, 'get_cart_item_from_session'), 10, 2);
         add_action('woocommerce_checkout_create_order_line_item', array($this, 'add_booking_data_to_order_item'), 10, 4);
         add_action('woocommerce_order_status_processing', array($this, 'create_booking_from_order'));
         add_action('woocommerce_order_status_completed', array($this, 'create_booking_from_order'));
@@ -282,17 +284,36 @@ class YFB_Product_Booking {
             }
 
             $booking_date = sanitize_text_field($_POST['yfb_booking_date']);
+            $booking_end_date = isset($_POST['yfb_booking_end_date']) ? sanitize_text_field($_POST['yfb_booking_end_date']) : $booking_date;
+
+            // Validate delivery address
+            if (empty($_POST['yfb_delivery_address'])) {
+                wc_add_notice(__('Please enter a delivery address.', 'yard-fairy-booking'), 'error');
+                return false;
+            }
 
             foreach (WC()->cart->get_cart() as $cart_item) {
-                if ($cart_item['product_id'] == $product_id && isset($cart_item['yfb_booking_date']) && $cart_item['yfb_booking_date'] === $booking_date) {
-                    wc_add_notice(__('You already have this product booked for this date in your cart.', 'yard-fairy-booking'), 'error');
-                    return false;
+                if ($cart_item['product_id'] == $product_id && isset($cart_item['yfb_booking_date'])) {
+                    $cart_start = $cart_item['yfb_booking_date'];
+                    $cart_end = isset($cart_item['yfb_booking_end_date']) ? $cart_item['yfb_booking_end_date'] : $cart_start;
+
+                    // Check for date overlap
+                    if ($booking_date <= $cart_end && $booking_end_date >= $cart_start) {
+                        wc_add_notice(__('You already have this product booked for overlapping dates in your cart.', 'yard-fairy-booking'), 'error');
+                        return false;
+                    }
                 }
             }
 
-            $is_available = $this->check_date_availability($product_id, $booking_date);
+            // Check availability for all dates in range
+            if ($booking_end_date && $booking_end_date !== $booking_date) {
+                $is_available = $this->check_date_range_availability($product_id, $booking_date, $booking_end_date);
+            } else {
+                $is_available = $this->check_date_availability($product_id, $booking_date);
+            }
+
             if (!$is_available) {
-                wc_add_notice(__('The selected date is no longer available.', 'yard-fairy-booking'), 'error');
+                wc_add_notice(__('One or more dates in your selection are no longer available.', 'yard-fairy-booking'), 'error');
                 return false;
             }
         }
@@ -305,18 +326,165 @@ class YFB_Product_Booking {
 
         if ($is_bookable === 'yes' && isset($_POST['yfb_booking_date'])) {
             $cart_item_data['yfb_booking_date'] = sanitize_text_field($_POST['yfb_booking_date']);
+
+            if (isset($_POST['yfb_booking_end_date']) && !empty($_POST['yfb_booking_end_date'])) {
+                $cart_item_data['yfb_booking_end_date'] = sanitize_text_field($_POST['yfb_booking_end_date']);
+
+                // Calculate multi-day pricing
+                $start = new DateTime($cart_item_data['yfb_booking_date']);
+                $end = new DateTime($cart_item_data['yfb_booking_end_date']);
+                $days = $start->diff($end)->days + 1;
+
+                if ($days > 1) {
+                    $cart_item_data['yfb_booking_days'] = $days;
+                }
+            }
+
+            // Add delivery information
+            if (isset($_POST['yfb_delivery_address']) && !empty($_POST['yfb_delivery_address'])) {
+                $cart_item_data['yfb_delivery_address'] = sanitize_text_field($_POST['yfb_delivery_address']);
+            }
+
+            if (isset($_POST['yfb_delivery_distance']) && !empty($_POST['yfb_delivery_distance'])) {
+                $cart_item_data['yfb_delivery_distance'] = floatval($_POST['yfb_delivery_distance']);
+            }
+
+            if (isset($_POST['yfb_delivery_fee']) && !empty($_POST['yfb_delivery_fee'])) {
+                $cart_item_data['yfb_delivery_fee'] = floatval($_POST['yfb_delivery_fee']);
+            }
+
             $cart_item_data['unique_key'] = md5(microtime().rand());
         }
 
         return $cart_item_data;
     }
 
+    public function get_cart_item_from_session($cart_item, $values) {
+        if (isset($values['yfb_booking_date'])) {
+            $cart_item['yfb_booking_date'] = $values['yfb_booking_date'];
+        }
+        if (isset($values['yfb_booking_end_date'])) {
+            $cart_item['yfb_booking_end_date'] = $values['yfb_booking_end_date'];
+        }
+        if (isset($values['yfb_booking_days'])) {
+            $cart_item['yfb_booking_days'] = $values['yfb_booking_days'];
+        }
+        if (isset($values['yfb_delivery_address'])) {
+            $cart_item['yfb_delivery_address'] = $values['yfb_delivery_address'];
+        }
+        if (isset($values['yfb_delivery_distance'])) {
+            $cart_item['yfb_delivery_distance'] = $values['yfb_delivery_distance'];
+        }
+        if (isset($values['yfb_delivery_fee'])) {
+            $cart_item['yfb_delivery_fee'] = $values['yfb_delivery_fee'];
+        }
+        return $cart_item;
+    }
+
+    public function update_cart_item_prices($cart) {
+        if (is_admin() && !defined('DOING_AJAX')) {
+            return;
+        }
+
+        if (did_action('woocommerce_before_calculate_totals') >= 2) {
+            return;
+        }
+
+        foreach ($cart->get_cart() as $cart_item) {
+            $product = $cart_item['data'];
+            $base_price = floatval($product->get_price());
+
+            if ($base_price <= 0) {
+                $base_price = floatval($product->get_regular_price());
+            }
+
+            $total_price = $base_price;
+
+            // Check if this is a multi-day booking
+            if (isset($cart_item['yfb_booking_days']) && $cart_item['yfb_booking_days'] > 1) {
+                // First day full price, subsequent days 50% off
+                $days = intval($cart_item['yfb_booking_days']);
+                $total_price = $base_price + (($days - 1) * ($base_price * 0.5));
+            }
+
+            // Add delivery fee if applicable (one-time fee per product)
+            if (isset($cart_item['yfb_delivery_fee']) && $cart_item['yfb_delivery_fee'] > 0) {
+                $total_price += floatval($cart_item['yfb_delivery_fee']);
+            }
+
+            if ($total_price != $base_price) {
+                $cart_item['data']->set_price($total_price);
+            }
+        }
+    }
+
     public function display_booking_data_in_cart($item_data, $cart_item) {
         if (isset($cart_item['yfb_booking_date'])) {
+            if (isset($cart_item['yfb_booking_end_date']) && !empty($cart_item['yfb_booking_end_date'])) {
+                $start_date = date_i18n(get_option('date_format'), strtotime($cart_item['yfb_booking_date']));
+                $end_date = date_i18n(get_option('date_format'), strtotime($cart_item['yfb_booking_end_date']));
+                $days = isset($cart_item['yfb_booking_days']) ? $cart_item['yfb_booking_days'] : 1;
+
+                $item_data[] = array(
+                    'name' => __('Booking Dates', 'yard-fairy-booking'),
+                    'value' => sprintf('<strong>%s</strong> to <strong>%s</strong> (%d day%s)', $start_date, $end_date, $days, $days > 1 ? 's' : ''),
+                );
+
+                if ($days > 1) {
+                    // Get base price for display
+                    $product = $cart_item['data'];
+                    $base_price = floatval($product->get_regular_price());
+
+                    $item_data[] = array(
+                        'name' => __('Pricing', 'yard-fairy-booking'),
+                        'value' => sprintf(
+                            __('Day 1: %s (full price)<br>Days 2-%d: %s each (50%% off)', 'yard-fairy-booking'),
+                            wc_price($base_price),
+                            $days,
+                            wc_price($base_price * 0.5)
+                        ),
+                    );
+                }
+            } else {
+                $item_data[] = array(
+                    'name' => __('Booking Date', 'yard-fairy-booking'),
+                    'value' => date_i18n(get_option('date_format'), strtotime($cart_item['yfb_booking_date'])),
+                );
+            }
+        }
+
+        // Display delivery information
+        if (isset($cart_item['yfb_delivery_address']) && !empty($cart_item['yfb_delivery_address'])) {
             $item_data[] = array(
-                'name' => __('Booking Date', 'yard-fairy-booking'),
-                'value' => date_i18n(get_option('date_format'), strtotime($cart_item['yfb_booking_date'])),
+                'name' => __('Delivery Address', 'yard-fairy-booking'),
+                'value' => esc_html($cart_item['yfb_delivery_address']),
             );
+
+            if (isset($cart_item['yfb_delivery_distance'])) {
+                $distance = floatval($cart_item['yfb_delivery_distance']);
+                $included_mileage = floatval(get_option('yfb_included_mileage', 10));
+
+                $item_data[] = array(
+                    'name' => __('Delivery Distance', 'yard-fairy-booking'),
+                    'value' => sprintf(__('%.2f miles', 'yard-fairy-booking'), $distance),
+                );
+
+                if (isset($cart_item['yfb_delivery_fee']) && $cart_item['yfb_delivery_fee'] > 0) {
+                    $item_data[] = array(
+                        'name' => __('Delivery Fee', 'yard-fairy-booking'),
+                        'value' => sprintf(
+                            __('%s (beyond %s mile included radius)', 'yard-fairy-booking'),
+                            wc_price($cart_item['yfb_delivery_fee']),
+                            $included_mileage
+                        ),
+                    );
+                } else {
+                    $item_data[] = array(
+                        'name' => __('Delivery Fee', 'yard-fairy-booking'),
+                        'value' => __('Free (within included radius)', 'yard-fairy-booking'),
+                    );
+                }
+            }
         }
 
         return $item_data;
@@ -324,9 +492,36 @@ class YFB_Product_Booking {
 
     public function add_booking_data_to_order_item($item, $cart_item_key, $values, $order) {
         if (isset($values['yfb_booking_date'])) {
-            $formatted_date = date_i18n('F j, Y', strtotime($values['yfb_booking_date']));
-            $item->add_meta_data(__('Booked Date', 'yard-fairy-booking'), $formatted_date);
-            $item->add_meta_data('_yfb_booking_date', $values['yfb_booking_date']);
+            if (isset($values['yfb_booking_end_date']) && !empty($values['yfb_booking_end_date'])) {
+                $start_date = date_i18n('F j, Y', strtotime($values['yfb_booking_date']));
+                $end_date = date_i18n('F j, Y', strtotime($values['yfb_booking_end_date']));
+                $days = isset($values['yfb_booking_days']) ? $values['yfb_booking_days'] : 1;
+
+                $item->add_meta_data(__('Booked Dates', 'yard-fairy-booking'), sprintf('%s to %s (%d day%s)', $start_date, $end_date, $days, $days > 1 ? 's' : ''));
+                $item->add_meta_data('_yfb_booking_date', $values['yfb_booking_date']);
+                $item->add_meta_data('_yfb_booking_end_date', $values['yfb_booking_end_date']);
+                $item->add_meta_data('_yfb_booking_days', $days);
+            } else {
+                $formatted_date = date_i18n('F j, Y', strtotime($values['yfb_booking_date']));
+                $item->add_meta_data(__('Booked Date', 'yard-fairy-booking'), $formatted_date);
+                $item->add_meta_data('_yfb_booking_date', $values['yfb_booking_date']);
+            }
+        }
+
+        // Add delivery information to order
+        if (isset($values['yfb_delivery_address']) && !empty($values['yfb_delivery_address'])) {
+            $item->add_meta_data(__('Delivery Address', 'yard-fairy-booking'), $values['yfb_delivery_address']);
+            $item->add_meta_data('_yfb_delivery_address', $values['yfb_delivery_address']);
+        }
+
+        if (isset($values['yfb_delivery_distance'])) {
+            $item->add_meta_data(__('Delivery Distance', 'yard-fairy-booking'), sprintf('%.2f miles', $values['yfb_delivery_distance']));
+            $item->add_meta_data('_yfb_delivery_distance', $values['yfb_delivery_distance']);
+        }
+
+        if (isset($values['yfb_delivery_fee']) && $values['yfb_delivery_fee'] > 0) {
+            $item->add_meta_data(__('Delivery Fee', 'yard-fairy-booking'), wc_price($values['yfb_delivery_fee']));
+            $item->add_meta_data('_yfb_delivery_fee', $values['yfb_delivery_fee']);
         }
     }
 
@@ -347,11 +542,17 @@ class YFB_Product_Booking {
 
             $product_id = $item->get_product_id();
             $product = $item->get_product();
-            $duration = get_post_meta($product_id, '_yfb_duration', true) ?: 1;
 
-            $end_datetime = new DateTime($booking_date, wp_timezone());
-            $end_datetime->add(new DateInterval('P' . $duration . 'D'));
-            $end_date = $end_datetime->format('Y-m-d');
+            // Check if this is a multi-day booking
+            $booking_end_date_meta = $item->get_meta('_yfb_booking_end_date');
+            if ($booking_end_date_meta) {
+                $end_date = $booking_end_date_meta;
+            } else {
+                $duration = get_post_meta($product_id, '_yfb_duration', true) ?: 1;
+                $end_datetime = new DateTime($booking_date, wp_timezone());
+                $end_datetime->add(new DateInterval('P' . $duration . 'D'));
+                $end_date = $end_datetime->format('Y-m-d');
+            }
 
             $customer_name = $order->get_billing_first_name() . ' ' . $order->get_billing_last_name();
             $customer_email = $order->get_billing_email();
@@ -394,6 +595,21 @@ class YFB_Product_Booking {
                 $gcal->sync_booking($booking_id);
             }
         }
+    }
+
+    private function check_date_range_availability($product_id, $start_date, $end_date) {
+        $current_date = new DateTime($start_date, wp_timezone());
+        $end = new DateTime($end_date, wp_timezone());
+
+        // Check each date in the range
+        while ($current_date <= $end) {
+            if (!$this->check_date_availability($product_id, $current_date->format('Y-m-d'))) {
+                return false;
+            }
+            $current_date->add(new DateInterval('P1D'));
+        }
+
+        return true;
     }
 
     private function check_date_availability($product_id, $date) {

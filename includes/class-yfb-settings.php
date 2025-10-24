@@ -18,6 +18,7 @@ class YFB_Settings {
     public function __construct() {
         add_action('admin_menu', array($this, 'add_settings_page'));
         add_action('admin_init', array($this, 'register_settings'));
+        add_action('admin_init', array($this, 'handle_disconnect'));
         add_action('wp_ajax_yfb_google_oauth_callback', array($this, 'handle_oauth_callback'));
     }
 
@@ -36,13 +37,74 @@ class YFB_Settings {
         register_setting('yfb_settings_group', 'yfb_google_client_id');
         register_setting('yfb_settings_group', 'yfb_google_client_secret');
         register_setting('yfb_settings_group', 'yfb_google_calendar_id');
-        
+        register_setting('yfb_settings_group', 'yfb_home_base_address');
+        register_setting('yfb_settings_group', 'yfb_included_mileage');
+        register_setting('yfb_settings_group', 'yfb_delivery_fee');
+        register_setting('yfb_settings_group', 'yfb_max_delivery_mileage');
+        register_setting('yfb_settings_group', 'yfb_max_mileage_message');
+        register_setting('yfb_settings_group', 'yfb_google_maps_api_key');
+
         $days = array('monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday');
         foreach ($days as $day) {
             register_setting('yfb_settings_group', 'yfb_default_day_' . $day . '_enabled');
             register_setting('yfb_settings_group', 'yfb_default_day_' . $day . '_start');
             register_setting('yfb_settings_group', 'yfb_default_day_' . $day . '_end');
         }
+
+        add_settings_section(
+            'yfb_delivery_settings',
+            __('Delivery Settings', 'yard-fairy-booking'),
+            array($this, 'delivery_settings_callback'),
+            'yfb-settings'
+        );
+
+        add_settings_field(
+            'yfb_google_maps_api_key',
+            __('Google Maps API Key', 'yard-fairy-booking'),
+            array($this, 'google_maps_api_key_callback'),
+            'yfb-settings',
+            'yfb_delivery_settings'
+        );
+
+        add_settings_field(
+            'yfb_home_base_address',
+            __('Home Base Address', 'yard-fairy-booking'),
+            array($this, 'home_base_address_callback'),
+            'yfb-settings',
+            'yfb_delivery_settings'
+        );
+
+        add_settings_field(
+            'yfb_included_mileage',
+            __('Included Mileage (miles)', 'yard-fairy-booking'),
+            array($this, 'included_mileage_callback'),
+            'yfb-settings',
+            'yfb_delivery_settings'
+        );
+
+        add_settings_field(
+            'yfb_delivery_fee',
+            __('Delivery Fee', 'yard-fairy-booking'),
+            array($this, 'delivery_fee_callback'),
+            'yfb-settings',
+            'yfb_delivery_settings'
+        );
+
+        add_settings_field(
+            'yfb_max_delivery_mileage',
+            __('Maximum Delivery Mileage (miles)', 'yard-fairy-booking'),
+            array($this, 'max_delivery_mileage_callback'),
+            'yfb-settings',
+            'yfb_delivery_settings'
+        );
+
+        add_settings_field(
+            'yfb_max_mileage_message',
+            __('Max Mileage Exceeded Message', 'yard-fairy-booking'),
+            array($this, 'max_mileage_message_callback'),
+            'yfb-settings',
+            'yfb_delivery_settings'
+        );
 
         add_settings_section(
             'yfb_availability_settings',
@@ -118,7 +180,25 @@ class YFB_Settings {
         register_setting('yfb_settings_group', 'yfb_google_event_description');
     }
 
+    public function handle_disconnect() {
+        if (isset($_POST['yfb_disconnect_google']) &&
+            isset($_POST['yfb_disconnect_nonce']) &&
+            wp_verify_nonce($_POST['yfb_disconnect_nonce'], 'yfb_disconnect_google') &&
+            current_user_can('manage_options')) {
+
+            delete_option('yfb_google_refresh_token');
+            delete_option('yfb_google_access_token');
+
+            wp_redirect(add_query_arg('disconnected', '1', admin_url('edit.php?post_type=yfb_booking&page=yfb-settings')));
+            exit;
+        }
+    }
+
     public function render_settings_page() {
+        if (isset($_GET['disconnected']) && $_GET['disconnected'] === '1') {
+            echo '<div class="notice notice-success is-dismissible"><p>' . __('Successfully disconnected from Google Calendar.', 'yard-fairy-booking') . '</p></div>';
+        }
+
         if (isset($_GET['auth'])) {
             if ($_GET['auth'] === 'success') {
                 echo '<div class="notice notice-success is-dismissible"><p>' . __('Successfully connected to Google Calendar!', 'yard-fairy-booking') . '</p></div>';
@@ -208,6 +288,46 @@ class YFB_Settings {
         <?php
     }
 
+    public function delivery_settings_callback() {
+        echo '<p>' . __('Configure delivery address validation and fee calculation. A Google Maps API key is required for distance calculation.', 'yard-fairy-booking') . '</p>';
+    }
+
+    public function google_maps_api_key_callback() {
+        $value = get_option('yfb_google_maps_api_key', '');
+        echo '<input type="text" name="yfb_google_maps_api_key" value="' . esc_attr($value) . '" class="regular-text">';
+        echo '<p class="description">' . __('Get your API key from <a href="https://console.cloud.google.com/google/maps-apis" target="_blank">Google Cloud Console</a>. Enable the Distance Matrix API.', 'yard-fairy-booking') . '</p>';
+    }
+
+    public function home_base_address_callback() {
+        $value = get_option('yfb_home_base_address', '');
+        echo '<input type="text" name="yfb_home_base_address" value="' . esc_attr($value) . '" class="large-text" placeholder="123 Main St, City, State ZIP">';
+        echo '<p class="description">' . __('Enter your home base address. Delivery distances will be calculated from this location.', 'yard-fairy-booking') . '</p>';
+    }
+
+    public function included_mileage_callback() {
+        $value = get_option('yfb_included_mileage', '10');
+        echo '<input type="number" name="yfb_included_mileage" value="' . esc_attr($value) . '" min="0" step="0.1" class="small-text"> ' . __('miles', 'yard-fairy-booking');
+        echo '<p class="description">' . __('Delivery within this distance is free. Distances beyond this will incur the delivery fee.', 'yard-fairy-booking') . '</p>';
+    }
+
+    public function delivery_fee_callback() {
+        $value = get_option('yfb_delivery_fee', '25');
+        echo '<input type="number" name="yfb_delivery_fee" value="' . esc_attr($value) . '" min="0" step="0.01" class="small-text"> ' . get_woocommerce_currency_symbol();
+        echo '<p class="description">' . __('One-time fee added to the cart for deliveries beyond the included mileage.', 'yard-fairy-booking') . '</p>';
+    }
+
+    public function max_delivery_mileage_callback() {
+        $value = get_option('yfb_max_delivery_mileage', '100');
+        echo '<input type="number" name="yfb_max_delivery_mileage" value="' . esc_attr($value) . '" min="0" step="0.1" class="small-text"> ' . __('miles', 'yard-fairy-booking');
+        echo '<p class="description">' . __('Maximum delivery distance allowed. Addresses beyond this distance cannot place orders.', 'yard-fairy-booking') . '</p>';
+    }
+
+    public function max_mileage_message_callback() {
+        $value = get_option('yfb_max_mileage_message', 'Sorry, we cannot deliver to your location. Please contact us for alternative arrangements.');
+        echo '<textarea name="yfb_max_mileage_message" rows="3" class="large-text">' . esc_textarea($value) . '</textarea>';
+        echo '<p class="description">' . __('Message displayed when delivery address exceeds maximum mileage. The add to cart button will be hidden.', 'yard-fairy-booking') . '</p>';
+    }
+
     public function availability_settings_callback() {
         echo '<p>' . __('Set the default availability for all bookable products. Products can override these settings individually.', 'yard-fairy-booking') . '</p>';
     }
@@ -289,12 +409,6 @@ class YFB_Settings {
     }
 
     public function auth_callback() {
-        if (isset($_POST['yfb_disconnect_google']) && wp_verify_nonce($_POST['yfb_disconnect_nonce'], 'yfb_disconnect_google')) {
-            delete_option('yfb_google_refresh_token');
-            delete_option('yfb_google_access_token');
-            echo '<div class="notice notice-success inline"><p>' . __('Disconnected from Google Calendar.', 'yard-fairy-booking') . '</p></div>';
-        }
-
         $client_id = get_option('yfb_google_client_id');
         $client_secret = get_option('yfb_google_client_secret');
         $refresh_token = get_option('yfb_google_refresh_token');
@@ -306,14 +420,14 @@ class YFB_Settings {
 
         if ($refresh_token) {
             echo '<p class="yfb-auth-status connected">' . __('✓ Connected to Google Calendar', 'yard-fairy-booking') . '</p>';
-            echo '<button type="button" class="button button-secondary" onclick="if(confirm(\'' . esc_js(__('Are you sure you want to disconnect?', 'yard-fairy-booking')) . '\')) { document.getElementById(\'yfb-disconnect-form\').submit(); }">' . __('Disconnect', 'yard-fairy-booking') . '</button>';
-            echo '<form id="yfb-disconnect-form" method="post" style="display:none;">';
-            echo '<input type="hidden" name="yfb_disconnect_google" value="1">';
+            echo '<form method="post" action="" style="display:inline;">';
             wp_nonce_field('yfb_disconnect_google', 'yfb_disconnect_nonce');
+            echo '<input type="hidden" name="yfb_disconnect_google" value="1">';
+            echo '<button type="submit" class="button button-secondary" onclick="return confirm(\'' . esc_js(__('Are you sure you want to disconnect from Google Calendar?', 'yard-fairy-booking')) . '\');">' . __('Disconnect', 'yard-fairy-booking') . '</button>';
             echo '</form>';
         } else {
             echo '<p class="yfb-auth-status disconnected">' . __('Not connected to Google Calendar', 'yard-fairy-booking') . '</p>';
-            
+
             if (!file_exists(YFB_PLUGIN_DIR . 'vendor/autoload.php')) {
                 echo '<div class="notice notice-warning inline"><p>';
                 echo __('Google Calendar integration requires the Google API client library. Run <code>composer install</code> in the plugin directory or upload the plugin with vendor folder included.', 'yard-fairy-booking');
