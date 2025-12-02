@@ -30,16 +30,20 @@ class YFB_Google_Calendar {
         $refresh_token = get_option('yfb_google_refresh_token');
 
         if (empty($client_id) || empty($client_secret) || empty($refresh_token)) {
+            error_log('YFB: Missing credentials - client_id: ' . (!empty($client_id) ? 'set' : 'empty') . ', client_secret: ' . (!empty($client_secret) ? 'set' : 'empty') . ', refresh_token: ' . (!empty($refresh_token) ? 'set' : 'empty'));
             return false;
         }
 
         $access_token_data = get_option('yfb_google_access_token');
 
-        // Check if token is expired
-        if ($access_token_data && isset($access_token_data['expires_at'])) {
+        // Check if token exists and is not expired
+        if ($access_token_data && isset($access_token_data['expires_at']) && isset($access_token_data['access_token'])) {
             if (time() < $access_token_data['expires_at']) {
                 return $access_token_data['access_token'];
             }
+            error_log('YFB: Access token expired, refreshing...');
+        } else {
+            error_log('YFB: No valid access token data, refreshing...');
         }
 
         // Refresh the access token
@@ -50,6 +54,7 @@ class YFB_Google_Calendar {
                 'refresh_token' => $refresh_token,
                 'grant_type' => 'refresh_token',
             ),
+            'timeout' => 30,
         ));
 
         if (is_wp_error($response)) {
@@ -57,11 +62,21 @@ class YFB_Google_Calendar {
             return false;
         }
 
+        $response_code = wp_remote_retrieve_response_code($response);
         $body = wp_remote_retrieve_body($response);
         $data = json_decode($body, true);
 
-        if (empty($data['access_token'])) {
-            error_log('YFB: No access token in refresh response: ' . $body);
+        if ($response_code !== 200 || empty($data['access_token'])) {
+            $error_msg = isset($data['error_description']) ? $data['error_description'] : (isset($data['error']) ? $data['error'] : 'Unknown error');
+            error_log('YFB: Token refresh failed (HTTP ' . $response_code . '): ' . $error_msg);
+            error_log('YFB: Full response: ' . $body);
+
+            // If token is invalid, clear it so user knows they need to re-authorize
+            if (isset($data['error']) && in_array($data['error'], array('invalid_grant', 'invalid_token'))) {
+                delete_option('yfb_google_refresh_token');
+                delete_option('yfb_google_access_token');
+                error_log('YFB: Refresh token invalid, cleared stored tokens. User needs to re-authorize.');
+            }
             return false;
         }
 
@@ -72,6 +87,7 @@ class YFB_Google_Calendar {
         );
         update_option('yfb_google_access_token', $token_data);
 
+        error_log('YFB: Successfully refreshed access token');
         return $data['access_token'];
     }
 
@@ -164,6 +180,11 @@ class YFB_Google_Calendar {
 
         $calendar_id = get_option('yfb_google_calendar_id', 'primary');
 
+        // Google Calendar all-day events require end date to be EXCLUSIVE (day after the last day)
+        $end_date_obj = new DateTime($end_date, wp_timezone());
+        $end_date_obj->add(new DateInterval('P1D'));
+        $end_date_exclusive = $end_date_obj->format('Y-m-d');
+
         $event_data = array(
             'summary' => $event_title,
             'description' => $event_description,
@@ -171,7 +192,7 @@ class YFB_Google_Calendar {
                 'date' => $booking_date,
             ),
             'end' => array(
-                'date' => $end_date,
+                'date' => $end_date_exclusive,
             ),
         );
 

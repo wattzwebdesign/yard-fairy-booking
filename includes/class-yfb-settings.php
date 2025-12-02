@@ -19,7 +19,38 @@ class YFB_Settings {
         add_action('admin_menu', array($this, 'add_settings_page'));
         add_action('admin_init', array($this, 'register_settings'));
         add_action('admin_init', array($this, 'handle_disconnect'));
+        add_action('admin_init', array($this, 'handle_google_settings_save'));
         add_action('wp_ajax_yfb_google_oauth_callback', array($this, 'handle_oauth_callback'));
+
+        // DEBUG: Add hooks to track option changes
+        add_action('updated_option', array($this, 'debug_option_update'), 10, 3);
+        add_action('deleted_option', array($this, 'debug_option_delete'), 10, 1);
+    }
+
+    /**
+     * Debug: Track option updates
+     */
+    public function debug_option_update($option_name, $old_value, $new_value) {
+        if (strpos($option_name, 'yfb_google') === 0) {
+            error_log('YFB DEBUG: Option UPDATED - ' . $option_name);
+            if ($option_name === 'yfb_google_refresh_token' || $option_name === 'yfb_google_access_token') {
+                error_log('YFB DEBUG: TOKEN CHANGED! Old: ' . (empty($old_value) ? 'EMPTY' : 'EXISTS') . ' New: ' . (empty($new_value) ? 'EMPTY' : 'EXISTS'));
+                error_log('YFB DEBUG: Backtrace: ' . wp_debug_backtrace_summary());
+            }
+        }
+    }
+
+    /**
+     * Debug: Track option deletions
+     */
+    public function debug_option_delete($option_name) {
+        if (strpos($option_name, 'yfb_google') === 0) {
+            error_log('YFB DEBUG: Option DELETED - ' . $option_name);
+            if ($option_name === 'yfb_google_refresh_token' || $option_name === 'yfb_google_access_token') {
+                error_log('YFB DEBUG: TOKEN DELETED!');
+                error_log('YFB DEBUG: Backtrace: ' . wp_debug_backtrace_summary());
+            }
+        }
     }
 
     public function add_settings_page() {
@@ -34,9 +65,10 @@ class YFB_Settings {
     }
 
     public function register_settings() {
-        register_setting('yfb_settings_group', 'yfb_google_client_id');
-        register_setting('yfb_settings_group', 'yfb_google_client_secret');
-        register_setting('yfb_settings_group', 'yfb_google_calendar_id');
+        // DEBUG: Log all registered options at init
+        error_log('YFB DEBUG: Registering settings');
+
+        // Google Calendar settings are handled separately - NOT part of this settings group
         register_setting('yfb_settings_group', 'yfb_home_base_address');
         register_setting('yfb_settings_group', 'yfb_included_mileage');
         register_setting('yfb_settings_group', 'yfb_delivery_fee');
@@ -121,63 +153,64 @@ class YFB_Settings {
             'yfb_availability_settings'
         );
 
-        add_settings_section(
-            'yfb_google_settings',
-            __('Google Calendar Integration', 'yard-fairy-booking'),
-            array($this, 'google_settings_callback'),
-            'yfb-settings'
-        );
+        // Google Calendar settings are NOT registered here - handled separately
+    }
 
-        add_settings_field(
-            'yfb_google_client_id',
-            __('Google Client ID', 'yard-fairy-booking'),
-            array($this, 'client_id_callback'),
-            'yfb-settings',
-            'yfb_google_settings'
-        );
+    /**
+     * Handle Google Calendar settings save (separate form)
+     */
+    public function handle_google_settings_save() {
+        if (!isset($_POST['yfb_save_google_settings']) || !isset($_POST['yfb_google_settings_nonce'])) {
+            return;
+        }
 
-        add_settings_field(
-            'yfb_google_client_secret',
-            __('Google Client Secret', 'yard-fairy-booking'),
-            array($this, 'client_secret_callback'),
-            'yfb-settings',
-            'yfb_google_settings'
-        );
+        if (!wp_verify_nonce($_POST['yfb_google_settings_nonce'], 'yfb_save_google_settings')) {
+            return;
+        }
 
-        add_settings_field(
-            'yfb_google_calendar_id',
-            __('Google Calendar ID', 'yard-fairy-booking'),
-            array($this, 'calendar_id_callback'),
-            'yfb-settings',
-            'yfb_google_settings'
-        );
+        if (!current_user_can('manage_options')) {
+            return;
+        }
 
-        add_settings_field(
-            'yfb_google_event_title',
-            __('Event Title Template', 'yard-fairy-booking'),
-            array($this, 'event_title_callback'),
-            'yfb-settings',
-            'yfb_google_settings'
-        );
+        // DEBUG: Log before save
+        error_log('YFB DEBUG: Before saving Google Calendar settings');
+        error_log('YFB DEBUG: Refresh token exists: ' . (get_option('yfb_google_refresh_token') ? 'YES' : 'NO'));
+        error_log('YFB DEBUG: Access token exists: ' . (get_option('yfb_google_access_token') ? 'YES' : 'NO'));
 
-        add_settings_field(
-            'yfb_google_event_description',
-            __('Event Description Template', 'yard-fairy-booking'),
-            array($this, 'event_description_callback'),
-            'yfb-settings',
-            'yfb_google_settings'
-        );
+        // Save Google Calendar settings
+        if (isset($_POST['yfb_google_client_id'])) {
+            update_option('yfb_google_client_id', sanitize_text_field($_POST['yfb_google_client_id']));
+            error_log('YFB DEBUG: Saved client_id');
+        }
 
-        add_settings_field(
-            'yfb_google_auth',
-            __('Authorization', 'yard-fairy-booking'),
-            array($this, 'auth_callback'),
-            'yfb-settings',
-            'yfb_google_settings'
-        );
+        if (isset($_POST['yfb_google_client_secret'])) {
+            update_option('yfb_google_client_secret', sanitize_text_field($_POST['yfb_google_client_secret']));
+            error_log('YFB DEBUG: Saved client_secret');
+        }
 
-        register_setting('yfb_settings_group', 'yfb_google_event_title');
-        register_setting('yfb_settings_group', 'yfb_google_event_description');
+        if (isset($_POST['yfb_google_calendar_id'])) {
+            update_option('yfb_google_calendar_id', sanitize_text_field($_POST['yfb_google_calendar_id']));
+            error_log('YFB DEBUG: Saved calendar_id');
+        }
+
+        if (isset($_POST['yfb_google_event_title'])) {
+            update_option('yfb_google_event_title', sanitize_text_field($_POST['yfb_google_event_title']));
+            error_log('YFB DEBUG: Saved event_title');
+        }
+
+        if (isset($_POST['yfb_google_event_description'])) {
+            update_option('yfb_google_event_description', sanitize_textarea_field($_POST['yfb_google_event_description']));
+            error_log('YFB DEBUG: Saved event_description');
+        }
+
+        // DEBUG: Log after save
+        error_log('YFB DEBUG: After saving Google Calendar settings');
+        error_log('YFB DEBUG: Refresh token exists: ' . (get_option('yfb_google_refresh_token') ? 'YES' : 'NO'));
+        error_log('YFB DEBUG: Access token exists: ' . (get_option('yfb_google_access_token') ? 'YES' : 'NO'));
+
+        // Redirect with success message
+        wp_redirect(add_query_arg('google_saved', '1', admin_url('edit.php?post_type=yfb_booking&page=yfb-settings')));
+        exit;
     }
 
     public function handle_disconnect() {
@@ -199,6 +232,10 @@ class YFB_Settings {
             echo '<div class="notice notice-success is-dismissible"><p>' . __('Successfully disconnected from Google Calendar.', 'yard-fairy-booking') . '</p></div>';
         }
 
+        if (isset($_GET['google_saved']) && $_GET['google_saved'] === '1') {
+            echo '<div class="notice notice-success is-dismissible"><p>' . __('Google Calendar settings saved successfully.', 'yard-fairy-booking') . '</p></div>';
+        }
+
         if (isset($_GET['auth'])) {
             if ($_GET['auth'] === 'success') {
                 echo '<div class="notice notice-success is-dismissible"><p>' . __('Successfully connected to Google Calendar!', 'yard-fairy-booking') . '</p></div>';
@@ -211,6 +248,118 @@ class YFB_Settings {
         ?>
         <div class="wrap">
             <h1><?php echo esc_html(get_admin_page_title()); ?></h1>
+
+            <!-- Google Calendar Integration Section (Separate Form) -->
+            <h2><?php _e('Google Calendar Integration', 'yard-fairy-booking'); ?></h2>
+            <form method="post" action="">
+                <?php wp_nonce_field('yfb_save_google_settings', 'yfb_google_settings_nonce'); ?>
+                <input type="hidden" name="yfb_save_google_settings" value="1">
+
+                <table class="form-table" role="presentation">
+                    <tbody>
+                        <tr>
+                            <th scope="row"><label for="yfb_google_client_id"><?php _e('Google Client ID', 'yard-fairy-booking'); ?></label></th>
+                            <td>
+                                <input type="text" name="yfb_google_client_id" id="yfb_google_client_id" value="<?php echo esc_attr(get_option('yfb_google_client_id', '')); ?>" class="regular-text">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="yfb_google_client_secret"><?php _e('Google Client Secret', 'yard-fairy-booking'); ?></label></th>
+                            <td>
+                                <input type="text" name="yfb_google_client_secret" id="yfb_google_client_secret" value="<?php echo esc_attr(get_option('yfb_google_client_secret', '')); ?>" class="regular-text">
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="yfb_google_calendar_id"><?php _e('Google Calendar ID', 'yard-fairy-booking'); ?></label></th>
+                            <td>
+                                <?php
+                                $calendar_id_value = get_option('yfb_google_calendar_id', 'primary');
+                                $refresh_token = get_option('yfb_google_refresh_token');
+
+                                if ($refresh_token) {
+                                    $calendars = $this->get_available_calendars();
+
+                                    if (!empty($calendars)) {
+                                        echo '<select name="yfb_google_calendar_id" id="yfb_google_calendar_id" class="regular-text">';
+                                        foreach ($calendars as $calendar) {
+                                            $selected = selected($calendar_id_value, $calendar['id'], false);
+                                            echo '<option value="' . esc_attr($calendar['id']) . '" ' . $selected . '>' . esc_html($calendar['name']) . '</option>';
+                                        }
+                                        echo '</select>';
+                                        echo '<p class="description">' . __('Select the calendar where bookings will be synced.', 'yard-fairy-booking') . '</p>';
+                                    } else {
+                                        echo '<input type="text" name="yfb_google_calendar_id" id="yfb_google_calendar_id" value="' . esc_attr($calendar_id_value) . '" class="regular-text">';
+                                        echo '<p class="description">' . __('Enter "primary" for your main calendar or the specific calendar ID.', 'yard-fairy-booking') . '</p>';
+                                    }
+                                } else {
+                                    echo '<input type="text" name="yfb_google_calendar_id" id="yfb_google_calendar_id" value="' . esc_attr($calendar_id_value) . '" class="regular-text">';
+                                    echo '<p class="description">' . __('Connect to Google Calendar first to see available calendars.', 'yard-fairy-booking') . '</p>';
+                                }
+                                ?>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="yfb_google_event_title"><?php _e('Event Title Template', 'yard-fairy-booking'); ?></label></th>
+                            <td>
+                                <input type="text" name="yfb_google_event_title" id="yfb_google_event_title" value="<?php echo esc_attr(get_option('yfb_google_event_title', '{product_name} - {customer_name}')); ?>" class="large-text">
+                                <p class="description"><?php _e('Available tags: {product_name}, {customer_name}, {customer_email}, {customer_phone}, {booking_date}, {order_id}', 'yard-fairy-booking'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><label for="yfb_google_event_description"><?php _e('Event Description Template', 'yard-fairy-booking'); ?></label></th>
+                            <td>
+                                <textarea name="yfb_google_event_description" id="yfb_google_event_description" rows="5" class="large-text"><?php echo esc_textarea(get_option('yfb_google_event_description', "Booking for {product_name}\nCustomer: {customer_name}\nEmail: {customer_email}\nPhone: {customer_phone}")); ?></textarea>
+                                <p class="description"><?php _e('Available tags: {product_name}, {customer_name}, {customer_email}, {customer_phone}, {booking_date}, {order_id}', 'yard-fairy-booking'); ?></p>
+                            </td>
+                        </tr>
+                        <tr>
+                            <th scope="row"><?php _e('Authorization', 'yard-fairy-booking'); ?></th>
+                            <td>
+                                <?php
+                                $client_id = get_option('yfb_google_client_id');
+                                $client_secret = get_option('yfb_google_client_secret');
+                                $refresh_token = get_option('yfb_google_refresh_token');
+
+                                if (!$client_id || !$client_secret) {
+                                    echo '<p class="yfb-auth-status disconnected">' . __('Please enter your Client ID and Client Secret first.', 'yard-fairy-booking') . '</p>';
+                                } elseif ($refresh_token) {
+                                    echo '<p class="yfb-auth-status connected">' . __('✓ Connected to Google Calendar', 'yard-fairy-booking') . '</p>';
+                                    // Disconnect button will be shown outside the form
+                                } else {
+                                    echo '<p class="yfb-auth-status disconnected">' . __('Not connected to Google Calendar', 'yard-fairy-booking') . '</p>';
+                                    $auth_url = $this->get_google_auth_url();
+                                    if ($auth_url) {
+                                        echo '<a href="' . esc_url($auth_url) . '" class="button button-primary">' . __('Authorize with Google', 'yard-fairy-booking') . '</a>';
+                                    }
+                                }
+                                ?>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <?php submit_button(__('Save Google Calendar Settings', 'yard-fairy-booking')); ?>
+            </form>
+
+            <?php
+            // Disconnect form (separate, outside the main form)
+            $refresh_token = get_option('yfb_google_refresh_token');
+            if ($refresh_token) {
+                ?>
+                <form method="post" action="" style="margin-top: 10px;">
+                    <?php wp_nonce_field('yfb_disconnect_google', 'yfb_disconnect_nonce'); ?>
+                    <input type="hidden" name="yfb_disconnect_google" value="1">
+                    <button type="submit" class="button button-secondary" onclick="return confirm('<?php echo esc_js(__('Are you sure you want to disconnect from Google Calendar?', 'yard-fairy-booking')); ?>');">
+                        <?php _e('Disconnect from Google Calendar', 'yard-fairy-booking'); ?>
+                    </button>
+                </form>
+                <?php
+            }
+            ?>
+
+            <hr style="margin: 40px 0;">
+
+            <!-- Main Settings Form -->
+            <h2><?php _e('General Settings', 'yard-fairy-booking'); ?></h2>
             <form method="post" action="options.php">
                 <?php
                 settings_fields('yfb_settings_group');
@@ -357,82 +506,6 @@ class YFB_Settings {
         echo '</table>';
     }
 
-    public function google_settings_callback() {
-        echo '<p>' . __('Configure your Google Calendar integration settings below.', 'yard-fairy-booking') . '</p>';
-    }
-
-    public function client_id_callback() {
-        $value = get_option('yfb_google_client_id', '');
-        echo '<input type="text" name="yfb_google_client_id" value="' . esc_attr($value) . '" class="regular-text">';
-    }
-
-    public function client_secret_callback() {
-        $value = get_option('yfb_google_client_secret', '');
-        echo '<input type="text" name="yfb_google_client_secret" value="' . esc_attr($value) . '" class="regular-text">';
-    }
-
-    public function event_title_callback() {
-        $value = get_option('yfb_google_event_title', '{product_name} - {customer_name}');
-        echo '<input type="text" name="yfb_google_event_title" value="' . esc_attr($value) . '" class="large-text">';
-        echo '<p class="description">' . __('Available tags: {product_name}, {customer_name}, {customer_email}, {customer_phone}, {booking_date}, {order_id}', 'yard-fairy-booking') . '</p>';
-    }
-
-    public function event_description_callback() {
-        $value = get_option('yfb_google_event_description', "Booking for {product_name}\nCustomer: {customer_name}\nEmail: {customer_email}\nPhone: {customer_phone}");
-        echo '<textarea name="yfb_google_event_description" rows="5" class="large-text">' . esc_textarea($value) . '</textarea>';
-        echo '<p class="description">' . __('Available tags: {product_name}, {customer_name}, {customer_email}, {customer_phone}, {booking_date}, {order_id}', 'yard-fairy-booking') . '</p>';
-    }
-
-    public function calendar_id_callback() {
-        $value = get_option('yfb_google_calendar_id', 'primary');
-        $refresh_token = get_option('yfb_google_refresh_token');
-        
-        if ($refresh_token) {
-            $calendars = $this->get_available_calendars();
-            
-            if (!empty($calendars)) {
-                echo '<select name="yfb_google_calendar_id" class="regular-text">';
-                foreach ($calendars as $calendar) {
-                    $selected = selected($value, $calendar['id'], false);
-                    echo '<option value="' . esc_attr($calendar['id']) . '" ' . $selected . '>' . esc_html($calendar['name']) . '</option>';
-                }
-                echo '</select>';
-                echo '<p class="description">' . __('Select the calendar where bookings will be synced.', 'yard-fairy-booking') . '</p>';
-            } else {
-                echo '<input type="text" name="yfb_google_calendar_id" value="' . esc_attr($value) . '" class="regular-text">';
-                echo '<p class="description">' . __('Enter "primary" for your main calendar or the specific calendar ID.', 'yard-fairy-booking') . '</p>';
-            }
-        } else {
-            echo '<input type="text" name="yfb_google_calendar_id" value="' . esc_attr($value) . '" class="regular-text">';
-            echo '<p class="description">' . __('Connect to Google Calendar first to see available calendars.', 'yard-fairy-booking') . '</p>';
-        }
-    }
-
-    public function auth_callback() {
-        $client_id = get_option('yfb_google_client_id');
-        $client_secret = get_option('yfb_google_client_secret');
-        $refresh_token = get_option('yfb_google_refresh_token');
-
-        if (!$client_id || !$client_secret) {
-            echo '<p class="yfb-auth-status disconnected">' . __('Please enter your Client ID and Client Secret first.', 'yard-fairy-booking') . '</p>';
-            return;
-        }
-
-        if ($refresh_token) {
-            echo '<p class="yfb-auth-status connected">' . __('✓ Connected to Google Calendar', 'yard-fairy-booking') . '</p>';
-            echo '<form method="post" action="" style="display:inline;">';
-            wp_nonce_field('yfb_disconnect_google', 'yfb_disconnect_nonce');
-            echo '<input type="hidden" name="yfb_disconnect_google" value="1">';
-            echo '<button type="submit" class="button button-secondary" onclick="return confirm(\'' . esc_js(__('Are you sure you want to disconnect from Google Calendar?', 'yard-fairy-booking')) . '\');">' . __('Disconnect', 'yard-fairy-booking') . '</button>';
-            echo '</form>';
-        } else {
-            echo '<p class="yfb-auth-status disconnected">' . __('Not connected to Google Calendar', 'yard-fairy-booking') . '</p>';
-            $auth_url = $this->get_google_auth_url();
-            if ($auth_url) {
-                echo '<a href="' . esc_url($auth_url) . '" class="button button-primary">' . __('Authorize with Google', 'yard-fairy-booking') . '</a>';
-            }
-        }
-    }
 
     private function get_google_auth_url() {
         $client_id = get_option('yfb_google_client_id');

@@ -1,5 +1,5 @@
 jQuery(document).ready(function($) {
-    
+
     let currentDate = new Date();
     let selectedDate = null;
     let selectedTime = null;
@@ -10,6 +10,58 @@ jQuery(document).ready(function($) {
     let deliveryDistance = 0;
     let deliveryFeeAmount = 0;
     let exceedsMaxMileage = false;
+    let autocomplete = null;
+
+    // Initialize Google Places Autocomplete
+    function initAutocomplete() {
+        const addressInput = document.getElementById('yfb_delivery_address');
+        if (!addressInput) {
+            return;
+        }
+
+        if (typeof google === 'undefined' || !google.maps || !google.maps.places) {
+            return;
+        }
+
+        try {
+            autocomplete = new google.maps.places.Autocomplete(addressInput, {
+                types: ['address'],
+                componentRestrictions: { country: 'us' }
+            });
+
+            // When user selects an address from autocomplete
+            autocomplete.addListener('place_changed', function() {
+                const place = autocomplete.getPlace();
+
+                if (!place.formatted_address) {
+                    return;
+                }
+
+                // Set the input value to the formatted address
+                addressInput.value = place.formatted_address;
+
+                // Trigger the blur event to calculate distance
+                setTimeout(function() {
+                    $(addressInput).trigger('blur');
+                }, 100);
+            });
+        } catch (error) {
+            console.error('Error initializing Google Places Autocomplete:', error);
+        }
+    }
+
+    // Initialize autocomplete when Google API is loaded
+    if (typeof yfb_ajax !== 'undefined' && yfb_ajax.google_places_enabled) {
+        // Check if Google Maps is already loaded
+        if (typeof google !== 'undefined' && google.maps && google.maps.places) {
+            setTimeout(initAutocomplete, 100);
+        } else {
+            // Wait for Google Maps API to load via callback
+            $(document).on('yfb-google-maps-loaded', function() {
+                setTimeout(initAutocomplete, 100);
+            });
+        }
+    }
 
     function renderCalendar(date) {
         const year = date.getFullYear();

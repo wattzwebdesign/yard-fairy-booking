@@ -3,7 +3,7 @@
  * Plugin Name: Yard Fairies Booking
  * Plugin URI: https://codewattz.com
  * Description: WooCommerce booking plugin with Google Calendar integration and front-end calendar display
- * Version: 1.0.3
+ * Version: 1.0.6
  * Author: Code Wattz
  * Author URI: https://codewattz.com
  * Text Domain: yard-fairy-booking
@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-define('YFB_VERSION', '1.0.3');
+define('YFB_VERSION', '1.0.6');
 define('YFB_PLUGIN_FILE', __FILE__);
 define('YFB_PLUGIN_DIR', plugin_dir_path(__FILE__));
 define('YFB_PLUGIN_URL', plugin_dir_url(__FILE__));
@@ -80,12 +80,31 @@ if (!class_exists('Yard_Fairy_Booking')) {
 
         public function enqueue_scripts() {
             wp_enqueue_style('yfb-frontend', YFB_PLUGIN_URL . 'assets/css/frontend.css', array(), YFB_VERSION);
+
+            // Enqueue Google Places API if API key is configured
+            $google_maps_api_key = get_option('yfb_google_maps_api_key');
+            if (!empty($google_maps_api_key)) {
+                // Add inline script to define callback BEFORE loading Google Maps
+                wp_add_inline_script('jquery', 'window.yfbInitGoogleMaps = function() { if (typeof jQuery !== "undefined") { jQuery(document).trigger("yfb-google-maps-loaded"); } };');
+
+                wp_enqueue_script('google-places-api', 'https://maps.googleapis.com/maps/api/js?key=' . esc_attr($google_maps_api_key) . '&libraries=places&loading=async&callback=yfbInitGoogleMaps', array('jquery'), null, true);
+                add_filter('script_loader_tag', array($this, 'add_async_defer_to_google_maps'), 10, 2);
+            }
+
             wp_enqueue_script('yfb-frontend', YFB_PLUGIN_URL . 'assets/js/frontend.js', array('jquery'), YFB_VERSION, true);
-            
+
             wp_localize_script('yfb-frontend', 'yfb_ajax', array(
                 'ajax_url' => admin_url('admin-ajax.php'),
-                'nonce' => wp_create_nonce('yfb_ajax_nonce')
+                'nonce' => wp_create_nonce('yfb_ajax_nonce'),
+                'google_places_enabled' => !empty($google_maps_api_key)
             ));
+        }
+
+        public function add_async_defer_to_google_maps($tag, $handle) {
+            if ('google-places-api' !== $handle) {
+                return $tag;
+            }
+            return str_replace(' src', ' async defer src', $tag);
         }
 
         public function admin_enqueue_scripts() {
